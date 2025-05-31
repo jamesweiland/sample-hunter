@@ -1,3 +1,7 @@
+_data/
+temp_tor_data/
+.vscode/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
