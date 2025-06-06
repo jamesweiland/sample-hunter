@@ -1,5 +1,6 @@
 _data/
 temp_tor_data/
+tmp_dir/
 .vscode/
 
 # Byte-compiled / optimized / DLL files

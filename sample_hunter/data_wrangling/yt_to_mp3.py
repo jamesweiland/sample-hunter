@@ -7,7 +7,12 @@ import argparse
 from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
-from sample_hunter._util import DATA_SAVE_DIR, DEFAULT_RETRIES, DEFAULT_RETRY_DELAY
+from sample_hunter._util import (
+    DATA_SAVE_DIR,
+    DEFAULT_RETRIES,
+    DEFAULT_RETRY_DELAY,
+    SigintHandler,
+)
 import sys
 import signal
 from retry import retry
@@ -199,27 +204,6 @@ def write_to_disk(bytes: bytes, path: Path) -> None:
         file.write(bytes)
 
 
-def sigint_handler(sig, frame):
-    """Save data on KeyboardInterrupt since this is a long script"""
-    curr = frame
-    df = None
-    args = None
-    while curr:
-        for name, val in curr.f_locals.items():
-            if name == "sampling_songs":
-                df = val
-            elif name == "args":
-                args = val
-        curr = curr.f_back
-    if df is not None and args is not None:
-        print(f"Saving data to {args.in_} before exiting...")
-        if args.in_ == ".csv":
-            df.to_csv(args.in_)
-        else:
-            df.to_json(args.in_, orient="index", indent=4)
-    sys.exit(0)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
@@ -254,7 +238,6 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-    signal.signal(signal.SIGINT, sigint_handler)
 
     if args.single:
         single_path = Path("/home/james/Downloads/test.mp3")
@@ -269,6 +252,9 @@ if __name__ == "__main__":
         sampling_songs = pd.read_csv(args.in_)
     else:
         sampling_songs = pd.read_json(args.in_, orient="index")
+
+    handler = SigintHandler("sampling_songs", args.in_)
+    signal.signal(signal.SIGINT, handler)
 
     if not args.append:
         sampling_songs["sampling_path"] = None
