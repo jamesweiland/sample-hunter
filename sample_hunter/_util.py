@@ -3,8 +3,18 @@ import os
 import sys
 from threading import Lock
 import multiprocessing
+import torch
+from torchaudio.transforms import AmplitudeToDB
+from torch import Tensor
+import matplotlib.pyplot as plt
 
 import pandas as pd
+
+# pipeline hyperparameters
+SAMPLE_RATE: int = 44_100  # 44.1 kHz
+N_FFT: int = 1024
+HOP_LENGTH: int = 512
+N_MELS: int = 64
 
 
 TOR_BROWSER_DIR: Path = Path("/home/james/tor-browser-linux-x86_64-14.5.3/tor-browser/")
@@ -23,6 +33,39 @@ DEFAULT_RETRIES: int = 5
 DEFAULT_RETRY_DELAY: float = 5.0
 THREADS: int = 1
 PROCS: int = multiprocessing.cpu_count()
+
+
+def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
+    """Plot a torch Tensor as a spectrogram"""
+    tensor = tensor.squeeze().cpu()
+    tensor = AmplitudeToDB()(tensor)
+
+    plt.figure(figsize=(12, 4))
+    plt.imshow(tensor.numpy(), aspect="auto", origin="lower", cmap="viridis")
+    plt.colorbar(format="%+2.0f dB")
+    plt.title(title)
+    plt.ylabel("Mel Frequency Bin")
+    plt.xlabel("Time Frame")
+    plt.show()
+
+
+def save_to_json_or_csv(path: Path, df: pd.DataFrame) -> None:
+    """Save a dataframe to json to csv"""
+    if path.suffix == ".csv":
+        return df.to_csv(path)
+    elif path.suffix == ".json":
+        return df.to_json(path)
+    raise RuntimeError("Illegal path suffix for writing df to file")
+
+
+def read_into_df(path: Path) -> pd.DataFrame:
+    """Read a json or csv file into a pandas dataframe"""
+
+    if path.suffix == ".csv":
+        return pd.read_csv(path)
+    elif path.suffix == ".json":
+        return pd.read_json(path)
+    raise RuntimeError("Illegal path suffix for reading into df")
 
 
 class SigintHandler:
