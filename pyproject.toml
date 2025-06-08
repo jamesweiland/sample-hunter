@@ -25,6 +25,7 @@ dependencies = [
     "tbselenium>=0.9.0",
     "torch>=2.7.1",
     "torchaudio>=2.7.1",
+    "torchsummary>=1.5.1",
     "tqdm>=4.67.1",
     "ytmusicapi>=1.10.3",
 ]

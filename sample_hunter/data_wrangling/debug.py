@@ -2,18 +2,21 @@ import pandas as pd
 from pathlib import Path
 import numpy as np
 
-df = pd.read_csv("_data/annotations.csv")
+annotations = pd.read_csv("_data/annotations.csv")
+samples = pd.read_csv("_data/samples.csv")
 
-for idx, row in df.iterrows():
-    row = row.astype("str")
+print(len(annotations))
+print(len(samples))
 
-    obfuscate = Path(row["obfuscate"])
-    unobfuscate = Path(row["unobfuscate"])
-    df.at[idx, "obfuscate"] = Path(
-        Path("/home/james/code/sample-hunter/_data/audio-dir") / obfuscate.name
-    )
-    df.at[idx, "unobfuscate"] = Path(
-        Path("/home/james/code/sample-hunter/_data/audio-dir") / unobfuscate.name
-    )
+annotations["stem"] = annotations["unob_full"].apply(lambda p: Path(p).stem)
+stem_to_path = dict(zip(annotations["stem"], annotations["unob_full"]))
 
-df.to_csv("_data/annotations.csv", index=False)
+samples["stem"] = samples["path"].apply(lambda p: Path(p).stem)
+samples["path"] = samples["stem"].map(stem_to_path)
+
+samples.to_csv("_data/samples.csv", index=False)
+
+# for col in df.select_dtypes(include=["object"]).columns:
+#     df[col] = df[col].str.replace("new_annotations.csv", "train", regex=False)
+
+# df.to_csv("_data/annotations.csv", index=False)

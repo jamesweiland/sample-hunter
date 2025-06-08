@@ -3,6 +3,7 @@ import os
 import re
 import signal
 import sys
+import tempfile
 import threading
 from sox import Transformer, Combiner
 from pathlib import Path
@@ -60,7 +61,10 @@ def get_transformer(**kwargs) -> Tuple[str, Transformer]:
     tempo = kwargs.get("tempo") or random.uniform(
         DEFAULT_PARAMS["tempo_lb"], DEFAULT_PARAMS["tempo_ub"]
     )
-    tfm.tempo(tempo)
+    if abs(tempo - 1.0) <= 0.1:
+        tfm.stretch(tempo)
+    else:
+        tfm.tempo(tempo)
     mods += "t" + str(round(tempo, 2))
 
     pitch = kwargs.get("pitch") or random.uniform(
@@ -106,8 +110,10 @@ def get_transformer(**kwargs) -> Tuple[str, Transformer]:
     return mods, tfm
 
 
-def make_noise(infile: Path, outdir: Path = TMP_DIR, **kwargs) -> Tuple[str, Path]:
+def make_noise(infile: Path, outfile: Path | None = None, **kwargs) -> Tuple[str, Path]:
     """Generates white or pink noise and returns the path to the synthesized file."""
+    if outfile is None:
+        outfile = Path(TMP_DIR / (str(os.getpid()) + "noise.mp3"))
     tfm = Transformer()
     whitenoise = kwargs.get("whitenoise")
     pinknoise = kwargs.get("pinknoise")
@@ -139,35 +145,46 @@ def make_noise(infile: Path, outdir: Path = TMP_DIR, **kwargs) -> Tuple[str, Pat
             noise_mods += "pN" + str(round(pinknoise, 2))
             extra_args.extend(["synth", "pinknoise", "vol", pinknoise])
 
-    outfile = Path(outdir / (str(os.getpid()) + "noise.mp3"))
     with multiprocessing.Lock():
         tfm.build_file(infile, outfile, extra_args=extra_args)
     return str(noise_mods), outfile
 
 
-def obfuscate(p: Path) -> Path:
+def obfuscate(
+    input: Path, out: Path | None = None, tmp_dir: Path | None = None
+) -> Path:
     """The main function. Accepts a path to an mp3 file and returns the path to the obfuscated file."""
 
-    mods, tfm = get_transformer()
-    noise_mods, noise_path = make_noise(p)
-    mods += noise_mods
-    outdir = args.outdir or p.parent
-    out = outdir / (p.stem + mods + p.suffix)
+    if tmp_dir is None:
+        tmp_dir = TMP_DIR
+    # make tmp file
+    fd, tmp_file = tempfile.mkstemp(suffix=".mp3", dir=str(tmp_dir))
+    os.close(fd)
+    tmp_file = Path(tmp_file)
+    # make noise tmp file
+    noise_fd, tmp_noise_file = tempfile.mkstemp(suffix=".mp3", dir=str(tmp_dir))
+    os.close(noise_fd)
+    tmp_noise_file = Path(tmp_noise_file)
 
-    tmp_file = Path(TMP_DIR / (str(os.getpid()) + ".mp3"))
-    tfm.build_file(str(p), str(tmp_file))
+    mods, tfm = get_transformer()
+    noise_mods, noise_path = make_noise(input, outfile=tmp_noise_file)
+    mods += noise_mods
+    if out is None:
+        out = input.parent / (input.stem + mods + input.suffix)
+
+    tfm.build_file(str(input), str(tmp_file))
 
     try:
         combiner = Combiner().set_input_format(file_type=["mp3", "mp3"])
         combiner.build([str(tmp_file), str(noise_path)], out, "mix")  # type: ignore
-        return out
+        return out  # type: ignore
     except Exception as e:
-        print(f"An error occured for {p}")
+        print(f"An error occured for {input}")
         print(str(e))
         raise
     finally:
         tmp_file.unlink(missing_ok=True)
-        noise_path.unlink(missing_ok=True)
+        tmp_noise_file.unlink(missing_ok=True)
 
 
 def clean_data_dir(data_dir: Path):

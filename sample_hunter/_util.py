@@ -3,10 +3,13 @@ import os
 import sys
 from threading import Lock
 import multiprocessing
+import threading
 import torch
 from torchaudio.transforms import AmplitudeToDB
 from torch import Tensor
 import matplotlib.pyplot as plt
+from typing import Any, List, Tuple
+from abc import ABC, abstractmethod
 
 import pandas as pd
 
@@ -15,7 +18,33 @@ SAMPLE_RATE: int = 44_100  # 44.1 kHz
 N_FFT: int = 1024
 HOP_LENGTH: int = 512
 N_MELS: int = 64
+STEP_LENGTH: float = 1.0  # the seconds of overlay with previous spectrograms
+SPECTROGRAM_WIDTH: float = 2.0  # how many seconds each spectrogram represents
+NUM_FOLDS: int = 5
+SNIPPET_LENGTH: float = 8.0  # number of seconds of each input
+WINDOW_SIZE: int = int(SAMPLE_RATE * SPECTROGRAM_WIDTH)  # 2 seconds per window
+STEP_SIZE: int = int(SAMPLE_RATE * STEP_LENGTH)  # 1 second overlay between windows
+DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
 
+# CNN hyperparameters
+STRIDE: int = 1
+PADDING: int = 1
+POOL_KERNEL_SIZE: int = 2
+CONV_LAYER_DIMS: List[Tuple[int, int]] = [
+    (1, 16),
+    (16, 32),
+    (32, 64),
+    (64, 128),
+    (128, 256),
+]
+NUM_BRANCHES: int = 4
+DIVIDE_AND_ENCODE_HIDDEN_DIM: int = 192
+EMBEDDING_DIM: int = 96
+# it is important to use a very large batch size for triplet mining
+BATCH_SIZE: int = 1_000
+LEARNING_RATE: float = 0.005
+NUM_EPOCHS: int = 10
+ALPHA: float = 0.2
 
 TOR_BROWSER_DIR: Path = Path("/home/james/tor-browser-linux-x86_64-14.5.3/tor-browser/")
 TEMP_TOR_DATA_DIR: Path = Path("/home/james/code/sample-hunter/temp_tor_data/")
@@ -25,6 +54,7 @@ TOR_PASSWORD: str = os.environ["TOR_PASSWORD"]
 PARENT_SITEMAP_URL: str = "https://www.hiphopisread.com/sitemap.xml"
 SITEMAP_SAVE_PATH: Path = Path("_data/sitemaps/")
 DATA_SAVE_DIR: Path = Path("_data/")
+TEMP_DIR: Path = Path(DATA_SAVE_DIR / "tmp/")
 ZIP_ARCHIVE_DIR: Path = Path("_data/archive/")
 
 DEFAULT_REQUEST_TIMEOUT: float = 15.0
@@ -33,6 +63,9 @@ DEFAULT_RETRIES: int = 5
 DEFAULT_RETRY_DELAY: float = 5.0
 THREADS: int = 1
 PROCS: int = multiprocessing.cpu_count()
+
+ANNOTATIONS_PATH: Path = Path(DATA_SAVE_DIR / "annotations.csv")
+AUDIO_DIR: Path = Path(DATA_SAVE_DIR / "audio-dir/")
 
 
 def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
@@ -52,9 +85,9 @@ def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
 def save_to_json_or_csv(path: Path, df: pd.DataFrame) -> None:
     """Save a dataframe to json to csv"""
     if path.suffix == ".csv":
-        return df.to_csv(path)
+        return df.to_csv(path, index=True)
     elif path.suffix == ".json":
-        return df.to_json(path)
+        return df.to_json(path, orient="index", indent=4)
     raise RuntimeError("Illegal path suffix for writing df to file")
 
 
@@ -111,22 +144,76 @@ class SigintHandler:
         sys.exit(0)
 
 
-class AtomicCounter:
-    """Atomic counter for assigning ports to threads"""
+class AtomicCounter(ABC):
+    """Abstract atomic counter for multiprocessing/threading"""
 
-    value: int
-    end: int | None
-    lock: Lock
+    @property
+    @abstractmethod
+    def lock(self) -> Any:
+        pass
 
-    def __init__(self, start: int, end: int | None = None):
-        self.value = start
+    @property
+    @abstractmethod
+    def value(self) -> int:
+        pass
+
+    @value.setter
+    @abstractmethod
+    def value(self, v):
+        pass
+
+    def __init__(self, end: int | None = None):
         self.end = end
-        self.lock = Lock()
 
     def fetch_and_increment(self, inc: int = 1) -> int:
         with self.lock:
             tmp = self.value
-            self.value += 1
+            self.value = tmp + inc
             if self.end is not None and self.value > self.end:
                 raise ValueError("Can't increment past max value")
+
+            print(f"FETCH RETURNED {tmp}")
             return tmp
+
+
+class ThreadAtomicCounter(AtomicCounter):
+    def __init__(self, start: int, end: int | None = None):
+        super().__init__(end)
+        self._lock = threading.Lock()
+        self._value = start
+
+    @property
+    def lock(self):
+        return self._lock
+
+    @property
+    def value(self) -> int:
+        return self._value
+
+    @value.setter
+    def value(self, v):
+        self._value = v
+
+
+class ProcessAtomicCounter(AtomicCounter):
+    def __init__(
+        self,
+        start: int,
+        end: int | None = None,
+    ):
+        super().__init__(end)
+        self.manager = multiprocessing.Manager()
+        self._shared = self.manager.Value("i", start)
+        self._lock = self.manager.Lock()
+
+    @property
+    def value(self) -> int:
+        return self._shared.value
+
+    @value.setter
+    def value(self, v):
+        self._shared.value = v
+
+    @property
+    def lock(self):
+        return self._lock
