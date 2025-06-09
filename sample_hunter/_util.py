@@ -1,11 +1,10 @@
 from pathlib import Path
 import os
 import sys
-from threading import Lock
 import multiprocessing
 import threading
 import torch
-from torchaudio.transforms import AmplitudeToDB
+from torchaudio.transforms import AmplitudeToDB, MelSpectrogram
 from torch import Tensor
 import matplotlib.pyplot as plt
 from typing import Any, List, Tuple
@@ -25,6 +24,9 @@ SNIPPET_LENGTH: float = 8.0  # number of seconds of each input
 WINDOW_SIZE: int = int(SAMPLE_RATE * SPECTROGRAM_WIDTH)  # 2 seconds per window
 STEP_SIZE: int = int(SAMPLE_RATE * STEP_LENGTH)  # 1 second overlay between windows
 DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
+DEFAULT_MEL_SPECTROGRAM = MelSpectrogram(
+    sample_rate=SAMPLE_RATE, n_fft=N_FFT, hop_length=HOP_LENGTH, n_mels=N_MELS
+)
 
 # CNN hyperparameters
 STRIDE: int = 1
@@ -64,8 +66,9 @@ DEFAULT_RETRY_DELAY: float = 5.0
 THREADS: int = 1
 PROCS: int = multiprocessing.cpu_count()
 
-ANNOTATIONS_PATH: Path = Path(DATA_SAVE_DIR / "annotations.csv")
+ANNOTATIONS_PATH: Path = Path(DATA_SAVE_DIR / "new_annotations.csv")
 AUDIO_DIR: Path = Path(DATA_SAVE_DIR / "audio-dir/")
+MODEL_SAVE_PATH: Path = Path(DATA_SAVE_DIR / "test.pth")
 
 
 def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):

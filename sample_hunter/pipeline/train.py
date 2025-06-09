@@ -6,13 +6,13 @@ from torch import Tensor
 from typing import Callable, List
 import argparse
 from pathlib import Path
-import random
 
 from sample_hunter.pipeline.song_pairs_dataset import SongPairsDataset
-from sample_hunter.pipeline.encoder_net import EncoderNet, INPUT_SHAPE
+from sample_hunter.pipeline.encoder_net import EncoderNet
 from sample_hunter._util import (
     ANNOTATIONS_PATH,
     AUDIO_DIR,
+    MODEL_SAVE_PATH,
     CONV_LAYER_DIMS,
     DIVIDE_AND_ENCODE_HIDDEN_DIM,
     EMBEDDING_DIM,
@@ -21,14 +21,12 @@ from sample_hunter._util import (
     POOL_KERNEL_SIZE,
     STRIDE,
     WINDOW_SIZE,
-    STEP_SIZE,
     SAMPLE_RATE,
-    N_FFT,
-    N_MELS,
-    HOP_LENGTH,
     LEARNING_RATE,
     NUM_EPOCHS,
     ALPHA,
+    BATCH_SIZE,
+    DEFAULT_MEL_SPECTROGRAM,
     DEVICE,
 )
 
@@ -57,7 +55,7 @@ def mine_negative_triplet(
 
     # pos_dists has shape (batch_size) and neg_dists has shape (batch_size, batch_size)
     pos_dists = torch.linalg.vector_norm(
-        anchor_embeddings - positive_embeddings, p=2, dim=1
+        anchor_embeddings - positive_embeddings, ord=2, dim=1
     )
     # i don't really understand why this is only anchor embeddings,
     # but chat insisted
@@ -121,8 +119,8 @@ def train_single_epoch(
 
         # mine the negative embedding
         negative_embeddings = mine_negative_triplet(
-            anchor_embeddings == anchor_embeddings,
-            positive_embeddings == positive_embeddings,
+            anchor_embeddings=anchor_embeddings,
+            positive_embeddings=positive_embeddings,
             song_ids=song_ids,
             alpha=alpha,
         )
@@ -134,7 +132,7 @@ def train_single_epoch(
         loss.backward()
         optimizer.step()
 
-    print(f"Loss: {loss.item}")
+    print(f"Loss: {loss.item()}")
 
 
 def train(
@@ -171,10 +169,17 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "audio-dir",
+        "--audio-dir",
         type=Path,
         help="The path to the directory of audio files",
         default=AUDIO_DIR,
+    )
+
+    parser.add_argument(
+        "--out",
+        type=Path,
+        help="The path to save the trained model to",
+        default=MODEL_SAVE_PATH,
     )
 
     return parser.parse_args()
@@ -182,6 +187,17 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+
+    spd = SongPairsDataset(
+        audio_dir=args.audio_dir,
+        annotations_file=args.annotations,
+        mel_spectrogram=DEFAULT_MEL_SPECTROGRAM,
+        target_sample_rate=SAMPLE_RATE,
+        num_samples=WINDOW_SIZE,
+        device=DEVICE,
+    )
+    input_shape = spd.shape()
+    dataloader = DataLoader(spd, batch_size=BATCH_SIZE)
 
     model = EncoderNet(
         conv_layer_dims=CONV_LAYER_DIMS,
@@ -191,22 +207,21 @@ if __name__ == "__main__":
         num_branches=NUM_BRANCHES,
         divide_and_encode_hidden_dim=DIVIDE_AND_ENCODE_HIDDEN_DIM,
         embedding_dim=EMBEDDING_DIM,
-        input_shape=INPUT_SHAPE,
+        input_shape=input_shape,
     ).to(DEVICE)
-
-    mel_spectrogram = MelSpectrogram(
-        sample_rate=SAMPLE_RATE, n_fft=N_FFT, hop_length=HOP_LENGTH, n_mels=N_MELS
-    )
-
-    spd = SongPairsDataset(
-        audio_dir=args.audio_dir,
-        annotations_file=args.annotations,
-        mel_spectrogram=mel_spectrogram,
-        target_sample_rate=SAMPLE_RATE,
-        window_size=WINDOW_SIZE,
-        step_size=STEP_SIZE,
-        device=DEVICE,
-    )
 
     adam = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     triplet_loss = nn.TripletMarginLoss()
+
+    train(
+        model=model,
+        dataloader=dataloader,
+        optimizer=adam,
+        loss_fn=triplet_loss,
+        device=DEVICE,
+        num_epochs=NUM_EPOCHS,
+        alpha=ALPHA,
+    )
+
+    torch.save(model.state_dict(), args.out)
+    print(f"Model saved to {args.out}")

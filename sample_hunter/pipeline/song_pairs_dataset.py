@@ -1,3 +1,4 @@
+from typing import Tuple
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset
@@ -92,6 +93,18 @@ class SongPairsDataset(Dataset):
 
         return unob_spec, ob_spec, song_id
 
+    def shape(self) -> torch.Size:
+        """Returns the shape of the tensors in the dataset"""
+        time_frames = int(
+            (
+                self.num_samples
+                + self.mel_spectrogram.n_fft
+                - self.mel_spectrogram.hop_length
+            )
+            / self.mel_spectrogram.hop_length
+        )
+        return torch.Size((1, self.mel_spectrogram.n_mels, time_frames))
+
     def _get_unobfuscated_path(self, idx):
         return self.annotations.at[idx, "unob_seg"]
 
@@ -143,6 +156,8 @@ if __name__ == "__main__":
         num_samples=WINDOW_SIZE,
         device=DEVICE,
     )
+
+    print(dataset.shape())
 
     print(len(dataset))
     X, Y, id = dataset[100]
