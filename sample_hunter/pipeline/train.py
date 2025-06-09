@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-from torchaudio.transforms import MelSpectrogram
 from torch.utils.data import DataLoader
 from torch import Tensor
-from typing import Callable, List
+from torch.utils.tensorboard import SummaryWriter
+from typing import Callable, Tuple
 import argparse
 from pathlib import Path
 
@@ -28,7 +28,23 @@ from sample_hunter._util import (
     BATCH_SIZE,
     DEFAULT_MEL_SPECTROGRAM,
     DEVICE,
+    DEFAULT_TEST_SPLIT,
 )
+
+
+def triplet_accuracy(
+    anchor: Tensor, positive: Tensor, negative: Tensor, alpha: float
+) -> float:
+    """Calculates the accuracy of the model by returning the ratio of positive embeddings
+    closer to the anchor than negative ones. The positive embedding must be at least `alpha` closer
+    to the anchor than the negative embedding"""
+    pos_dists = torch.linalg.vector_norm(anchor - positive, ord=2, dim=1)
+    neg_dists = torch.linalg.vector_norm(anchor - negative, ord=2, dim=1)
+    print(pos_dists)
+    print(neg_dists)
+    correct = pos_dists < neg_dists + alpha  # a boolean mask
+    print(correct)
+    return correct.float().mean().item()
 
 
 def mine_negative_triplet(
@@ -104,8 +120,13 @@ def train_single_epoch(
     optimizer: torch.optim.Optimizer,
     device: str,
     alpha: float,
-):
-    loss = Tensor()
+) -> Tuple[float, float]:
+    """
+    Train `model` for a single epoch. Returns a (loss, accuracy) tuple
+    """
+    epoch_total_loss = 0
+    num_batches = 0
+    epoch_total_accuracy = 0
     for anchor_batch, positive_batch, song_ids in dataloader:
         anchor_batch, positive_batch, song_ids = (
             anchor_batch.to(device),
@@ -115,7 +136,11 @@ def train_single_epoch(
 
         # predict embeddings
         anchor_embeddings = model(anchor_batch)
+        print(anchor_embeddings)
         positive_embeddings = model(positive_batch)
+        print(positive_embeddings)
+
+        assert anchor_embeddings != positive_embeddings
 
         # mine the negative embedding
         negative_embeddings = mine_negative_triplet(
@@ -132,7 +157,20 @@ def train_single_epoch(
         loss.backward()
         optimizer.step()
 
-    print(f"Loss: {loss.item()}")
+        epoch_total_loss += loss.item()
+        epoch_total_accuracy += triplet_accuracy(
+            anchor=anchor_embeddings,
+            positive=positive_embeddings,
+            negative=negative_embeddings,
+            alpha=alpha,
+        )
+        num_batches += 1
+
+    epoch_average_loss = epoch_total_loss / num_batches
+    print(f"Average loss of epoch: {epoch_average_loss}")
+    epoch_average_accuracy = epoch_total_accuracy / num_batches
+    print(f"Epoch accuracy: {epoch_total_accuracy}")
+    return epoch_average_loss, epoch_average_accuracy
 
 
 def train(
@@ -144,9 +182,11 @@ def train(
     num_epochs: int,
     alpha: float,
 ):
+    model.train()
+    writer = SummaryWriter(log_dir="_data/tmp")
     for i in range(num_epochs):
         print(f"Epoch {i + 1}")
-        train_single_epoch(
+        loss, accuracy = train_single_epoch(
             model=model,
             dataloader=dataloader,
             loss_fn=loss_fn,
@@ -154,7 +194,10 @@ def train(
             device=device,
             alpha=alpha,
         )
+        writer.add_scalar("Training loss", loss, i)
+        writer.add_scalar("Training accuracy", accuracy, i)
         print("--------------------------------------------")
+    writer.close()
     print("Finished training")
 
 
@@ -180,6 +223,13 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="The path to save the trained model to",
         default=MODEL_SAVE_PATH,
+    )
+
+    parser.add_argument(
+        "--test-split",
+        type=float,
+        help="The fraction of data to use for testing",
+        default=DEFAULT_TEST_SPLIT,
     )
 
     return parser.parse_args()
@@ -212,6 +262,10 @@ if __name__ == "__main__":
 
     adam = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     triplet_loss = nn.TripletMarginLoss()
+
+    # X_train, X_test = torch.utils.data.random_split(
+    #     dataset=spd, lengths=[1 - args.test_split, args.test_split]
+    # )
 
     train(
         model=model,

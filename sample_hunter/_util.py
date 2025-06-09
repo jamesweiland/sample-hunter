@@ -47,6 +47,7 @@ BATCH_SIZE: int = 1_000
 LEARNING_RATE: float = 0.005
 NUM_EPOCHS: int = 10
 ALPHA: float = 0.2
+DEFAULT_TEST_SPLIT: float = 0.25
 
 TOR_BROWSER_DIR: Path = Path("/home/james/tor-browser-linux-x86_64-14.5.3/tor-browser/")
 TEMP_TOR_DATA_DIR: Path = Path("/home/james/code/sample-hunter/temp_tor_data/")

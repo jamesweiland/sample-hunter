@@ -1,13 +1,9 @@
 import multiprocessing
 import os
 import re
-import signal
-import sys
 import tempfile
-import threading
 from sox import Transformer, Combiner
 from pathlib import Path
-import numpy as np
 import argparse
 import random
 import pandas as pd
