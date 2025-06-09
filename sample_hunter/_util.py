@@ -171,8 +171,6 @@ class AtomicCounter(ABC):
             self.value = tmp + inc
             if self.end is not None and self.value > self.end:
                 raise ValueError("Can't increment past max value")
-
-            print(f"FETCH RETURNED {tmp}")
             return tmp
 
 
