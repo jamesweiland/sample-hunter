@@ -1,7 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import get_ident, local
 import time
-from scraper._util import THREADS, DriverContext, TOR_BROWSER_DIR
+from sample_hunter._util import THREADS, TOR_BROWSER_DIR
+from sample_hunter.scraper.driver_context import DriverContext
 from scraper.get_pages import AtomicCounter, is_port_in_use
 from tbselenium.tbdriver import TorBrowserDriver
 import os

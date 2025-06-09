@@ -1,3 +1,11 @@
+import os
+from pathlib import Path
+import shutil
+import uuid
+from selenium.webdriver.firefox.options import Options
+from tbselenium.tbdriver import TorBrowserDriver
+from tbselenium.utils import launch_tbb_tor_with_stem
+import tbselenium.common as cm
 from typing import Any, Callable
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -5,32 +13,19 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from selenium.webdriver.firefox.options import Options
 import time
-from pathlib import Path
-from tbselenium.tbdriver import TorBrowserDriver
-from tbselenium.utils import launch_tbb_tor_with_stem
-import tbselenium.common as cm
-import uuid
-import shutil
-import os
 from stem import Signal
 from stem.control import Controller
 
-
-TOR_BROWSER_DIR: Path = Path("/home/james/tor-browser-linux-x86_64-14.5.3/tor-browser/")
-TEMP_TOR_DATA_DIR: Path = Path("/home/james/code/sample-hunter/temp_tor_data/")
-TOR_PASSWORD: str = os.environ["TOR_PASSWORD"]
-
-
-PARENT_SITEMAP_URL: str = "https://www.hiphopisread.com/sitemap.xml"
-SITEMAP_SAVE_PATH: Path = Path("_data/sitemaps/")
-DATA_SAVE_DIR: Path = Path("_data/")
-
-DEFAULT_REQUEST_TIMEOUT: float = 15.0
-DEFAULT_DOWNLOAD_TIME: float = 2700.0
-DEFAULT_RETRIES: int = 5
-THREADS: int = 1
+from sample_hunter._util import (
+    DATA_SAVE_DIR,
+    DEFAULT_DOWNLOAD_TIME,
+    DEFAULT_REQUEST_TIMEOUT,
+    DEFAULT_RETRIES,
+    TEMP_TOR_DATA_DIR,
+    TOR_BROWSER_DIR,
+    TOR_PASSWORD,
+)
 
 
 class DriverContext:

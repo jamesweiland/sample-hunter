@@ -1,46 +1,31 @@
 import os
 import socket
 import time
-from scraper._util import PARENT_SITEMAP_URL, DriverContext, DATA_SAVE_DIR, THREADS
+from sample_hunter._util import (
+    PARENT_SITEMAP_URL,
+    DATA_SAVE_DIR,
+    THREADS,
+    AtomicCounter,
+)
+from sample_hunter.scraper.driver_context import DriverContext
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from pathlib import Path
 import requests
 from bs4 import BeautifulSoup, ResultSet
 from typing import List
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, field_serializer
 from bs4 import Tag
 import argparse
 import shutil
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock, get_ident, local
+from threading import get_ident, local
 from tqdm import tqdm
 
 
 class DownloadNotFoundException(Exception):
     pass
-
-
-class AtomicCounter:
-    """Atomic counter for assigning ports to threads"""
-
-    value: int
-    end: int | None
-    lock: Lock
-
-    def __init__(self, start: int, end: int | None = None):
-        self.value = start
-        self.end = end
-        self.lock = Lock()
-
-    def fetch_and_increment(self, inc: int = 1) -> int:
-        with self.lock:
-            tmp = self.value
-            self.value += 1
-            if self.end is not None and self.value > self.end:
-                raise ValueError("Can't increment past max value")
-            return tmp
 
 
 class SampleSet(BaseModel):
@@ -302,12 +287,3 @@ if __name__ == "__main__":
     save_path = Path(data_save_path / "summary.json")
     with open(save_path, "w") as f:
         json.dump([s.model_dump() for s in results], f, indent=4)
-
-    """
-    for each sitemap:
-        
-        if loc contains 'sample-set':
-            go to that page and get the meganz download link
-            download the zip file to data_/{name}
-            append samplesets with the relevant info
-    """
