@@ -48,50 +48,45 @@ class SongPairsDataset(Dataset):
         self.num_samples = num_samples
         self.device = device
 
-        if "song_id" not in self.annotations.columns:
-            self.annotations["song_id"] = self.annotations["unob_full"].apply(
-                lambda p: hash(Path(p).stem)
-            )
-
     def __len__(self):
         return len(self.annotations)
 
     def __getitem__(self, idx):
         # load both unobfuscated and obfuscated waveform
-        unobfuscated_path = self._get_unobfuscated_path(idx)
-        obfuscated_path = self._get_obfuscated_path(idx)
+        anchor_path = self._get_anchor_path(idx)
+        positive_path = self._get_positive_path(idx)
 
-        unobfuscated_signal, unobfuscated_sr = torchaudio.load(
-            unobfuscated_path, format="mp3", backend="ffmpeg"
+        anchor_signal, anchor_sr = torchaudio.load(
+            anchor_path, format="mp3", backend="ffmpeg"
         )
-        obfuscated_signal, obfuscated_sr = torchaudio.load(
-            obfuscated_path, format="mp3", backend="ffmpeg"
+        positive_signal, positive_sr = torchaudio.load(
+            positive_path, format="mp3", backend="ffmpeg"
         )
-        unobfuscated_signal = unobfuscated_signal.to(self.device)
-        obfuscated_signal = obfuscated_signal.to(self.device)
+        anchor_signal = anchor_signal.to(self.device)
+        positive_signal = positive_signal.to(self.device)
         # the signals are tensors with dimensions: (num_channels, samples)
 
         # mix signals down to mono if they are more than one channel
         # (set num_channels = 1)
-        unobfuscated_signal = self._mix_down(obfuscated_signal)
-        obfuscated_signal = self._mix_down(unobfuscated_signal)
+        anchor_signal = self._mix_down(anchor_signal)
+        positive_signal = self._mix_down(positive_signal)
 
         # downsample to target sampling rate
-        unobfuscated_signal = self._resample(unobfuscated_sr, unobfuscated_signal)
-        obfuscated_signal = self._resample(obfuscated_sr, obfuscated_signal)
+        anchor_signal = self._resample(anchor_sr, anchor_signal)
+        positive_signal = self._resample(positive_sr, positive_signal)
 
         # truncate/pad signals if necessary
-        unobfuscated_signal = self._pad_or_truncate(unobfuscated_signal)
-        obfuscated_signal = self._pad_or_truncate(obfuscated_signal)
+        anchor_signal = self._pad_or_truncate(anchor_signal)
+        positive_signal = self._pad_or_truncate(positive_signal)
 
         # apply the transformation (spectrogram) to each window
-        unob_spec = self.mel_spectrogram(unobfuscated_signal)  # anchor
-        ob_spec = self.mel_spectrogram(obfuscated_signal)  # positive
+        anchor_spec = self.mel_spectrogram(anchor_signal)  # anchor
+        positive_spec = self.mel_spectrogram(positive_signal)  # positive
 
         # finally, get the song id associated with this snippet
         song_id = self.annotations.at[idx, "song_id"]
 
-        return unob_spec, ob_spec, song_id
+        return anchor_spec, positive_spec, song_id
 
     def shape(self) -> torch.Size:
         """Returns the shape of the tensors in the dataset"""
@@ -105,11 +100,11 @@ class SongPairsDataset(Dataset):
         )
         return torch.Size((1, self.mel_spectrogram.n_mels, time_frames))
 
-    def _get_unobfuscated_path(self, idx):
-        return self.annotations.at[idx, "unob_seg"]
+    def _get_anchor_path(self, idx):
+        return self.annotations.at[idx, "anchor"]
 
-    def _get_obfuscated_path(self, idx):
-        return self.annotations.at[idx, "ob_seg"]
+    def _get_positive_path(self, idx):
+        return self.annotations.at[idx, "positive"]
 
     def _mix_down(self, signal: Tensor) -> Tensor:
         """If the signal is more than one channel, mix down to mono"""
@@ -166,5 +161,7 @@ if __name__ == "__main__":
     print(type(id))
 
     print(X.shape, Y.shape)
+    print(dataset.annotations.at[100, "positive"])
+    print(dataset.annotations.at[100, "anchor"])
     plot_spectrogram(X, "unobfuscated")
     plot_spectrogram(Y, "obfuscated")
