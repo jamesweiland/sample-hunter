@@ -49,6 +49,7 @@ NUM_EPOCHS: int = 10
 ALPHA: float = 0.2
 DEFAULT_TEST_SPLIT: float = 0.25
 
+
 TOR_BROWSER_DIR: Path = Path("/home/james/tor-browser-linux-x86_64-14.5.3/tor-browser/")
 TEMP_TOR_DATA_DIR: Path = Path("/home/james/code/sample-hunter/temp_tor_data/")
 TOR_PASSWORD: str = os.environ["TOR_PASSWORD"]
@@ -70,6 +71,7 @@ PROCS: int = multiprocessing.cpu_count()
 ANNOTATIONS_PATH: Path = Path(DATA_SAVE_DIR / "new_annotations.csv")
 AUDIO_DIR: Path = Path(DATA_SAVE_DIR / "audio-dir/")
 MODEL_SAVE_PATH: Path = Path(DATA_SAVE_DIR / "test.pth")
+TRAIN_LOG_DIR: Path = Path("_data/logs")
 
 
 def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):

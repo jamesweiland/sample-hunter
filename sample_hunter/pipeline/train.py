@@ -29,6 +29,7 @@ from sample_hunter._util import (
     DEFAULT_MEL_SPECTROGRAM,
     DEVICE,
     DEFAULT_TEST_SPLIT,
+    TRAIN_LOG_DIR,
 )
 
 
@@ -40,10 +41,8 @@ def triplet_accuracy(
     to the anchor than the negative embedding"""
     pos_dists = torch.linalg.vector_norm(anchor - positive, ord=2, dim=1)
     neg_dists = torch.linalg.vector_norm(anchor - negative, ord=2, dim=1)
-    print(pos_dists)
-    print(neg_dists)
+
     correct = pos_dists < neg_dists + alpha  # a boolean mask
-    print(correct)
     return correct.float().mean().item()
 
 
@@ -136,11 +135,7 @@ def train_single_epoch(
 
         # predict embeddings
         anchor_embeddings = model(anchor_batch)
-        print(anchor_embeddings)
         positive_embeddings = model(positive_batch)
-        print(positive_embeddings)
-
-        assert anchor_embeddings != positive_embeddings
 
         # mine the negative embedding
         negative_embeddings = mine_negative_triplet(
@@ -181,9 +176,10 @@ def train(
     device: str,
     num_epochs: int,
     alpha: float,
+    log_dir: Path = TRAIN_LOG_DIR,
 ):
     model.train()
-    writer = SummaryWriter(log_dir="_data/tmp")
+    writer = SummaryWriter(log_dir=log_dir)
     for i in range(num_epochs):
         print(f"Epoch {i + 1}")
         loss, accuracy = train_single_epoch(
