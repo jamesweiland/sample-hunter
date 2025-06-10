@@ -29,13 +29,31 @@ def get_recordings_by_artist(mb_artist_id: str, limit=100) -> List[Dict]:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--artists", nargs="+", help="List of artist names to fetch", required=True)
+    parser.add_argument("--artists", nargs="+", help="List of artist names to fetch")
+    parser.add_argument("--artist-file", type=str, help="Text file with artist names, one per line")
     parser.add_argument("--out", type=str, default="query_list.csv")
     parser.add_argument("--per-artist", type=int, default=100, help="Max recordings per artist")
     args = parser.parse_args()
 
+    # Load artist names from file or CLI
+    if args.artist_file:
+        with open(args.artist_file) as f:
+            artist_names = [line.strip() for line in f if line.strip()]
+    elif args.artists:
+        artist_names = args.artists
+    else:
+        parser.error("Either --artists or --artist-file required")
+
+    if args.artist_file:
+        with open(args.artist_file) as f:
+            artist_names = [line.strip() for line in f if line.strip()]
+    elif args.artists:
+        artist_names = args.artists
+    else:
+        parser.error("Either --artists or --artist-file required")
+
     all_rows = []
-    for artist_name in args.artists:
+    for artist_name in artist_names:
         print(f"Searching for artist: {artist_name}")
         artists = search_artist(artist_name)
         if not artists:
@@ -54,7 +72,7 @@ def main():
                 "mb_recording_id": rec.get("id", ""),
                 "mb_artist_id": mb_artist_id,
             })
-        time.sleep(0.25)  # Be polite to the API
+        time.sleep(1)  # Be polite to the API
 
     df = pd.DataFrame(all_rows)
     df.to_csv(args.out, index=False)
