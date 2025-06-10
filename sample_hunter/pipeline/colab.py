@@ -52,6 +52,17 @@ if __name__ == "__main__":
 
     annotations = pd.read_csv(args.annotations)
 
+    # right now, we're only focused on fold 1
+    annotations = annotations[annotations["fold"] == 1]
+    # need to update the paths to connect to drive
+    drive_path = Path("/content/MyDrive/sample-hunter/fold-1")
+    annotations["anchor"] = annotations["anchor"].apply(
+        lambda p: Path(drive_path / Path(p).name).__str__()
+    )
+    annotations["positive"] = annotations["positive"].apply(
+        lambda p: Path(drive_path / Path(p).name).__str__()
+    )
+
     song_ids = pd.Series(annotations["song_id"].unique())
     test_song_ids = song_ids.sample(frac=args.test_frac)
     train_song_ids = song_ids.drop(index=test_song_ids.index)
@@ -69,6 +80,7 @@ if __name__ == "__main__":
     )
 
     assert train_dataset.shape() == test_dataset.shape()
+
     input_shape = train_dataset.shape()
     train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE)
     test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
