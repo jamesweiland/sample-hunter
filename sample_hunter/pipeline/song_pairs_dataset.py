@@ -16,6 +16,7 @@ from sample_hunter._util import (
     plot_spectrogram,
     WINDOW_SIZE,
     DEVICE,
+    DEFAULT_MEL_SPECTROGRAM,
 )
 
 
@@ -31,17 +32,19 @@ class SongPairsDataset(Dataset):
     def __init__(
         self,
         audio_dir: Path,
-        annotations_file: Path,
-        mel_spectrogram: MelSpectrogram,
-        target_sample_rate: int,
-        num_samples: int,
-        device: str,
+        annotations_file: Path | pd.DataFrame,
+        mel_spectrogram: MelSpectrogram = DEFAULT_MEL_SPECTROGRAM,
+        target_sample_rate: int = SAMPLE_RATE,
+        num_samples: int = WINDOW_SIZE,
+        device: str = DEVICE,
     ):
         """Initialize a SongPairs dataset. Each pair consists of an original audio
         file with it's obfuscated version. audio_dir is the
         path to the directory of audio files."""
-
-        self.annotations = read_into_df(annotations_file)
+        if isinstance(annotations_file, Path):
+            self.annotations = read_into_df(annotations_file)
+        else:
+            self.annotations = annotations_file
         self.audio_dir = audio_dir
         self.mel_spectrogram = mel_spectrogram.to(device)
         self.target_sample_rate = target_sample_rate
