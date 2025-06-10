@@ -55,7 +55,7 @@ if __name__ == "__main__":
     # right now, we're only focused on fold 1
     annotations = annotations[annotations["fold"] == 1]
     # need to update the paths to connect to drive
-    drive_path = Path("/content/MyDrive/sample-hunter/fold-1")
+    drive_path = Path("/content/drive/MyDrive/sample-hunter/fold-1")
     annotations["anchor"] = annotations["anchor"].apply(
         lambda p: Path(drive_path / Path(p).name).__str__()
     )
