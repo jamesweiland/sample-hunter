@@ -53,7 +53,7 @@ if __name__ == "__main__":
     annotations = pd.read_csv(args.annotations)
 
     song_ids = pd.Series(annotations["song_id"].unique())
-    test_song_ids = song_ids.sample(frac=args.test_split)
+    test_song_ids = song_ids.sample(frac=args.test_frac)
     train_song_ids = song_ids.drop(index=test_song_ids.index)
 
     test_annotations = annotations[annotations["song_id"].isin(test_song_ids)]
@@ -84,3 +84,6 @@ if __name__ == "__main__":
         optimizer=adam,
         loss_fn=triplet_loss,
     )
+
+    torch.save(model.state_dict(), args.out)
+    print(f"Model saved to {args.out}")

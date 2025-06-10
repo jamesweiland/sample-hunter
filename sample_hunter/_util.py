@@ -6,7 +6,8 @@ import threading
 import torch
 from torchaudio.transforms import AmplitudeToDB, MelSpectrogram
 from torch import Tensor
-import matplotlib.pyplot as plt
+
+# import matplotlib.pyplot as plt
 from typing import Any, List, Tuple
 from abc import ABC, abstractmethod
 
@@ -52,7 +53,7 @@ DEFAULT_TEST_SPLIT: float = 0.25
 
 TOR_BROWSER_DIR: Path = Path("/home/james/tor-browser-linux-x86_64-14.5.3/tor-browser/")
 TEMP_TOR_DATA_DIR: Path = Path("/home/james/code/sample-hunter/temp_tor_data/")
-TOR_PASSWORD: str = os.environ["TOR_PASSWORD"]
+# TOR_PASSWORD: str = os.environ["TOR_PASSWORD"]
 
 
 PARENT_SITEMAP_URL: str = "https://www.hiphopisread.com/sitemap.xml"
