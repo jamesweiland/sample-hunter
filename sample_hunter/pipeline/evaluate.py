@@ -2,8 +2,8 @@ import torch.nn as nn
 from torch import Tensor
 from torch.utils.data import DataLoader
 
-from sample_hunter.pipeline.train import triplet_accuracy, mine_negative_triplet
-from sample_hunter._util import DEVICE, ALPHA
+from sample_hunter.pipeline.triplet_loss import triplet_accuracy, mine_negative_triplet
+from sample_hunter._util import DEVICE, ALPHA, ALPHA
 
 
 def evaluate(
