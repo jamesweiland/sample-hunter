@@ -9,6 +9,7 @@ from pathlib import Path
 
 from sample_hunter.pipeline.song_pairs_dataset import SongPairsDataset
 from sample_hunter.pipeline.encoder_net import EncoderNet
+from sample_hunter.pipeline.evaluate import evaluate
 from sample_hunter._util import (
     ANNOTATIONS_PATH,
     AUDIO_DIR,
@@ -123,6 +124,7 @@ def train_single_epoch(
     """
     Train `model` for a single epoch. Returns a (loss, accuracy) tuple
     """
+    model.train()
     epoch_total_loss = 0
     num_batches = 0
     epoch_total_accuracy = 0
@@ -170,21 +172,21 @@ def train_single_epoch(
 
 def train(
     model: nn.Module,
-    dataloader: DataLoader,
+    train_dataloader: DataLoader,
     loss_fn: Callable,
     optimizer: torch.optim.Optimizer,
-    device: str,
-    num_epochs: int,
-    alpha: float,
+    test_dataloader: DataLoader | None = None,
+    device: str = DEVICE,
+    num_epochs: int = NUM_EPOCHS,
+    alpha: float = ALPHA,
     log_dir: Path = TRAIN_LOG_DIR,
 ):
-    model.train()
     writer = SummaryWriter(log_dir=log_dir)
     for i in range(num_epochs):
         print(f"Epoch {i + 1}")
         loss, accuracy = train_single_epoch(
             model=model,
-            dataloader=dataloader,
+            dataloader=train_dataloader,
             loss_fn=loss_fn,
             optimizer=optimizer,
             device=device,
@@ -192,6 +194,14 @@ def train(
         )
         writer.add_scalar("Training loss", loss, i)
         writer.add_scalar("Training accuracy", accuracy, i)
+
+        if test_dataloader is not None:
+            # evaluate accuracy as we go on the test set
+            accuracy = evaluate(
+                model=model, dataloader=test_dataloader, alpha=alpha, device=device
+            )
+            writer.add_scalar("Testing accuracy", accuracy, i)
+
         print("--------------------------------------------")
     writer.close()
     print("Finished training")
@@ -265,7 +275,7 @@ if __name__ == "__main__":
 
     train(
         model=model,
-        dataloader=dataloader,
+        train_dataloader=dataloader,
         optimizer=adam,
         loss_fn=triplet_loss,
         device=DEVICE,

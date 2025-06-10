@@ -25,14 +25,14 @@ from sample_hunter._util import (
 class EncoderNet(nn.Module):
     def __init__(
         self,
-        conv_layer_dims: List[Tuple[int, int]],
-        stride: int,
-        padding: int,
-        pool_kernel_size: int,
-        num_branches: int,
-        divide_and_encode_hidden_dim: int,
-        embedding_dim: int,
         input_shape: torch.Size,
+        conv_layer_dims: List[Tuple[int, int]] = CONV_LAYER_DIMS,
+        stride: int = STRIDE,
+        padding: int = PADDING,
+        pool_kernel_size: int = POOL_KERNEL_SIZE,
+        num_branches: int = NUM_BRANCHES,
+        divide_and_encode_hidden_dim: int = DIVIDE_AND_ENCODE_HIDDEN_DIM,
+        embedding_dim: int = EMBEDDING_DIM,
     ):
         super().__init__()
 
