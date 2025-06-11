@@ -140,7 +140,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "repo-id", type=str, help="The path to the HF dataset", default=HF_DATASET
+        "--repo-id", type=str, help="The path to the HF dataset", default=HF_DATASET
     )
 
     return parser.parse_args()
