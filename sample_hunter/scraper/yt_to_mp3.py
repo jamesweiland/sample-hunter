@@ -17,10 +17,6 @@ import sys
 import signal
 from retry import retry
 
-CNVMP3_DOMAIN = "https://cnvmp3.com/"
-RATE_LIMIT_TIMEOUT: float = 60.0
-
-
 class CnvMP3Exception(Exception):
     def __init__(self, r: RequestiumResponse, *args):
         self.response = r
@@ -235,67 +231,85 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
+CNVMP3_DOMAIN = "https://cnvmp3.com/"
+RATE_LIMIT_TIMEOUT: float = 60.0
+
+# ... [CnvMP3Exception, VideoLimitException, RateLimitException, CnvMP3Client, write_to_disk: UNCHANGED] ...
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--in",
+        help="The path to the CSV file to get mp3 files for",
+        dest="in_",
+        type=Path,
+        default=Path(DATA_SAVE_DIR / "query_list_with_urls.csv"),
+    )
+    parser.add_argument(
+        "--headless",
+        help="Open the selenium driver as a headless instance",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--single",
+        help="Option to pass a single URL to process, for debugging",
+        type=str,
+    )
+    return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_args()
+    DATA_DIR = Path(DATA_SAVE_DIR)
+    MP3_DIR = DATA_DIR / "train"
+    MP3_DIR.mkdir(parents=True, exist_ok=True)
+    METADATA_CSV = DATA_DIR / "mp3_metadata.csv"
 
     if args.single:
-        single_path = Path("/home/james/Downloads/test.mp3")
+        single_path = MP3_DIR / "test.mp3"
         with CnvMP3Client(headless=args.headless) as client:
             mp3 = client.yt_to_mp3(args.single)
             if mp3:
                 write_to_disk(mp3, single_path)
         sys.exit(0)
 
-    assert args.in_.suffix == ".json" or args.in_.suffix == ".csv"
-    if args.in_.suffix == ".csv":
-        sampling_songs = pd.read_csv(args.in_)
-    else:
-        sampling_songs = pd.read_json(args.in_, orient="index")
-
-    handler = SigintHandler("sampling_songs", args.in_)
-    signal.signal(signal.SIGINT, handler)
-
-    if not args.append:
-        sampling_songs["sampling_path"] = None
-        to_process = sampling_songs
-    else:
-        to_process = sampling_songs[sampling_songs["sampling_path"].isnull()]
+    # Read CSV
+    df = pd.read_csv(args.in_)
+    records = []
 
     with CnvMP3Client(headless=args.headless) as client:
-        # do smth
-        for idx, row in tqdm(list(to_process.iterrows())):
-            row = row.astype("str")
-            yt_url = row["yt_url"]
-            if yt_url:
-                print(f"Processing {yt_url}...")
-                download_path = Path(row["path"]).parent / (row["title"] + ".mp3")
-                try:
-                    mp3 = client.yt_to_mp3(yt_url)
-                except Exception as e:
-                    print(
-                        "An unknown error occurred. Saving progress before exiting..."
-                    )
-                    if args.in_.suffix == ".csv":
-                        sampling_songs.to_csv(args.in_)
-                    else:
-                        sampling_songs.to_json(args.in_, orient="index", indent=4)
-                    print(
-                        f"Progress saved to {args.in_}. Progress can be resumed"
-                        " without overwriting with the --append argument."
-                    )
+        for idx, row in tqdm(df.iterrows(), total=len(df)):
+            yt_url = str(row.get("yt_url", ""))
+            if not yt_url or yt_url == "nan":
+                print(f"Skipping row {idx}: no yt_url")
+                continue
+            id_str = f"{idx+1:05d}"
+            out_file = MP3_DIR / f"{id_str}.mp3"
+            print(f"Processing {yt_url} -> {out_file.name} ...")
+            try:
+                mp3 = client.yt_to_mp3(yt_url)
+            except Exception as e:
+                print(f"Error downloading {yt_url}: {e}")
+                continue
+            if mp3:
+                write_to_disk(mp3, out_file)
+                print(f"Saved: {out_file}")
+                records.append({
+                    "id": id_str,
+                    "artist": row.get("artist", ""),
+                    "title": row.get("title", ""),
+                    "album": row.get("album", ""),
+                    "year": row.get("year", ""),
+                    "videoId": row.get("videoId", ""),
+                    "yt_url": yt_url,
+                    "filename": out_file.name
+                })
+            else:
+                print(f"Failed to download {yt_url}")
+            time.sleep(1)
 
-                    raise e
-
-                if mp3:
-                    write_to_disk(mp3, download_path)
-                    sampling_songs.at[idx, "sampling_path"] = download_path
-                    print(f"Downloaded {yt_url} to {download_path}")
-
-    print(f"Saving table to {args.in_}...")
-    if args.in_.suffix == ".csv":
-        sampling_songs.to_csv(args.in_)
+    if records:
+        meta_df = pd.DataFrame(records)
+        meta_df.to_csv(METADATA_CSV, index=False)
+        print(f"Metadata saved to {METADATA_CSV}")
     else:
-        sampling_songs.to_json(args.in_, orient="index", indent=4)
-
-    print("All good!")
+        print("No successful downloads.")
