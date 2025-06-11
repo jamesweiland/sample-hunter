@@ -57,7 +57,7 @@ def mine_negative_triplet(
     )
     valid_neg_mask = same_song_mask & margin_mask
 
-    negatives = torch.zeros(anchor_embeddings.shape)
+    negatives = torch.zeros_like(anchor_embeddings, device=anchor_embeddings.device)
     for i in range(batch_size):
         valid_negs = valid_neg_mask[i].nonzero().squeeze(dim=1)
         if valid_negs.any():

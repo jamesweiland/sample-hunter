@@ -7,6 +7,7 @@ from typing import Callable, Tuple
 import argparse
 from pathlib import Path
 from datasets import load_dataset, IterableDataset
+from tqdm import tqdm
 
 from sample_hunter.pipeline.encoder_net import EncoderNet
 from sample_hunter.pipeline.triplet_loss import mine_negative_triplet, triplet_accuracy
@@ -53,7 +54,7 @@ def train_single_epoch(
     epoch_total_loss = 0
     num_batches = 0
     epoch_total_accuracy = 0
-    for batch in dataloader:
+    for batch in tqdm(dataloader, desc="Training epoch..."):
         anchor_batch = batch["anchor"].to(device)
         positive_batch = batch["positive"].to(device)
         song_ids = batch["song_id"].to(device)
@@ -172,9 +173,9 @@ if __name__ == "__main__":
     assert isinstance(train_dataset, IterableDataset) and isinstance(
         test_dataset, IterableDataset
     )
-    assert train_dataset.features["anchor"] == train_dataset.features["positive"]
+    assert train_dataset.features["anchor"] == train_dataset.features["positive"]  # type: ignore
 
-    input_shape = train_dataset.features["anchor"].shape
+    input_shape = train_dataset.features["anchor"].shape  # type: ignore
     train_dataloader = DataLoader(
         train_dataset, batch_size=BATCH_SIZE, num_workers=PROCS  # type: ignore
     )
