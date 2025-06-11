@@ -19,7 +19,11 @@ def evaluate(
 
     sum_accuracy = 0.0
     num_batches = 0
-    for anchor, positive, song_ids in dataloader:
+    for batch in dataloader:
+        positive = batch["positive"]
+        anchor = batch["anchor"]
+        song_ids = batch["song_ids"]
+
         batch_accuracy = evaluate_batch(
             model=model,
             positive=positive,

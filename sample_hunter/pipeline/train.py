@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import Callable, Tuple
 import argparse
 from pathlib import Path
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 
 from sample_hunter.pipeline.encoder_net import EncoderNet
 from sample_hunter.pipeline.triplet_loss import mine_negative_triplet, triplet_accuracy
@@ -33,6 +33,7 @@ from sample_hunter._util import (
     DEFAULT_TEST_SPLIT,
     TRAIN_LOG_DIR,
     PROCS,
+    HF_DATASET,
 )
 
 
@@ -132,20 +133,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--annotations",
-        type=Path,
-        help="The path to the file with annotated pairs",
-        default=ANNOTATIONS_PATH,
-    )
-
-    parser.add_argument(
-        "--audio-dir",
-        type=Path,
-        help="The path to the directory of audio files",
-        default=AUDIO_DIR,
-    )
-
-    parser.add_argument(
         "--out",
         type=Path,
         help="The path to save the trained model to",
@@ -153,10 +140,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--test-split",
-        type=float,
-        help="The fraction of data to use for testing",
-        default=DEFAULT_TEST_SPLIT,
+        "repo-id", type=str, help="The path to the HF dataset", default=HF_DATASET
     )
 
     return parser.parse_args()
@@ -165,14 +149,25 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    hf_dataset = load_dataset(
-        path="samplr/audio-obfuscation",
+    train_dataset = load_dataset(
+        path=args.repo_id,
         split="train_1",
         streaming=True,
     ).with_format("torch")
-    assert hf_dataset.features["anchor"] == hf_dataset.features["positive"]
-    input_shape = hf_dataset.features["anchor"].shape
-    dataloader = DataLoader(hf_dataset, batch_size=BATCH_SIZE)
+
+    test_dataset = load_dataset(
+        path=args.repo_id,
+        split="test_1",
+        streaming=True,
+    ).with_format("torch")
+    assert isinstance(train_dataset, Dataset) and isinstance(test_dataset, Dataset)
+    assert train_dataset.features["anchor"] == train_dataset.features["positive"]
+
+    input_shape = train_dataset.features["anchor"].shape
+    train_dataloader = DataLoader(
+        train_dataset, batch_size=BATCH_SIZE, num_workers=PROCS  # type: ignore
+    )
+    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, num_workers=PROCS)  # type: ignore
 
     model = EncoderNet(
         conv_layer_dims=CONV_LAYER_DIMS,
@@ -188,13 +183,10 @@ if __name__ == "__main__":
     adam = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     triplet_loss = nn.TripletMarginLoss()
 
-    # X_train, X_test = torch.utils.data.random_split(
-    #     dataset=spd, lengths=[1 - args.test_split, args.test_split]
-    # )
-
     train(
         model=model,
-        train_dataloader=dataloader,
+        train_dataloader=train_dataloader,
+        test_dataloader=test_dataloader,
         optimizer=adam,
         loss_fn=triplet_loss,
         device=DEVICE,

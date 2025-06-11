@@ -73,6 +73,7 @@ ANNOTATIONS_PATH: Path = Path(DATA_SAVE_DIR / "new_annotations.csv")
 AUDIO_DIR: Path = Path(DATA_SAVE_DIR / "audio-dir/")
 MODEL_SAVE_PATH: Path = Path(DATA_SAVE_DIR / "test.pth")
 TRAIN_LOG_DIR: Path = Path("_data/logs")
+HF_DATASET: str = "samplr/audio-obfuscation"
 
 
 def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
