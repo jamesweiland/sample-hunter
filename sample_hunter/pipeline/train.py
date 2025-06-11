@@ -34,6 +34,7 @@ from sample_hunter._util import (
     TRAIN_LOG_DIR,
     PROCS,
     HF_DATASET,
+    HF_TOKEN,
 )
 
 
@@ -143,6 +144,10 @@ def parse_args() -> argparse.Namespace:
         "--repo-id", type=str, help="The path to the HF dataset", default=HF_DATASET
     )
 
+    parser.add_argument(
+        "token", type=str, help="Your huggingface token", default=HF_TOKEN
+    )
+
     return parser.parse_args()
 
 
@@ -150,15 +155,11 @@ if __name__ == "__main__":
     args = parse_args()
 
     train_dataset = load_dataset(
-        path=args.repo_id,
-        split="train_1",
-        streaming=True,
+        path=args.repo_id, split="train_1", streaming=True, token=args.token
     ).with_format("torch")
 
     test_dataset = load_dataset(
-        path=args.repo_id,
-        split="test_1",
-        streaming=True,
+        path=args.repo_id, split="test_1", streaming=True, token=args.token
     ).with_format("torch")
     assert isinstance(train_dataset, Dataset) and isinstance(test_dataset, Dataset)
     assert train_dataset.features["anchor"] == train_dataset.features["positive"]
