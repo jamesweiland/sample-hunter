@@ -73,6 +73,7 @@ AUDIO_DIR: Path = Path(DATA_SAVE_DIR / "audio-dir/")
 MODEL_SAVE_PATH: Path = Path(DATA_SAVE_DIR / "test.pth")
 TRAIN_LOG_DIR: Path = Path("_data/logs")
 HF_DATASET: str = "samplr/audio-obfuscation"
+HF_TOKEN: str = os.environ.get("HF_TOKEN", "")
 
 
 def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
