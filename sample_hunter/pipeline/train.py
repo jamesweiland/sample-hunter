@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import Callable, Tuple
 import argparse
 from pathlib import Path
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, IterableDataset
 
 from sample_hunter.pipeline.encoder_net import EncoderNet
 from sample_hunter.pipeline.triplet_loss import mine_negative_triplet, triplet_accuracy
@@ -145,7 +145,14 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "token", type=str, help="Your huggingface token", default=HF_TOKEN
+        "--token", type=str, help="Your huggingface token", default=HF_TOKEN
+    )
+
+    parser.add_argument(
+        "--tensorboard",
+        type=Path,
+        help="The path to the log directory for tensorboard",
+        default=TRAIN_LOG_DIR,
     )
 
     return parser.parse_args()
@@ -161,7 +168,10 @@ if __name__ == "__main__":
     test_dataset = load_dataset(
         path=args.repo_id, split="test_1", streaming=True, token=args.token
     ).with_format("torch")
-    assert isinstance(train_dataset, Dataset) and isinstance(test_dataset, Dataset)
+
+    assert isinstance(train_dataset, IterableDataset) and isinstance(
+        test_dataset, IterableDataset
+    )
     assert train_dataset.features["anchor"] == train_dataset.features["positive"]
 
     input_shape = train_dataset.features["anchor"].shape
@@ -190,6 +200,7 @@ if __name__ == "__main__":
         test_dataloader=test_dataloader,
         optimizer=adam,
         loss_fn=triplet_loss,
+        log_dir=args.tensorboard,
         device=DEVICE,
         num_epochs=NUM_EPOCHS,
         alpha=ALPHA,
