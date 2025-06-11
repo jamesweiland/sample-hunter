@@ -6,8 +6,8 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import Callable, Tuple
 import argparse
 from pathlib import Path
+from datasets import load_dataset
 
-from sample_hunter.pipeline.song_pairs_dataset import SongPairsDataset
 from sample_hunter.pipeline.encoder_net import EncoderNet
 from sample_hunter.pipeline.triplet_loss import triplet_accuracy, mine_negative_triplet
 from sample_hunter.pipeline.evaluate import evaluate
@@ -32,6 +32,7 @@ from sample_hunter._util import (
     DEVICE,
     DEFAULT_TEST_SPLIT,
     TRAIN_LOG_DIR,
+    PROCS,
 )
 
 
@@ -50,12 +51,10 @@ def train_single_epoch(
     epoch_total_loss = 0
     num_batches = 0
     epoch_total_accuracy = 0
-    for anchor_batch, positive_batch, song_ids in dataloader:
-        anchor_batch, positive_batch, song_ids = (
-            anchor_batch.to(device),
-            positive_batch.to(device),
-            song_ids.to(device),
-        )
+    for batch in dataloader:
+        anchor_batch = batch["anchor"].to(device)
+        positive_batch = batch["positive"].to(device)
+        song_ids = batch["song_id"].to(device)
 
         # predict embeddings
         anchor_embeddings = model(anchor_batch)
@@ -166,16 +165,14 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    spd = SongPairsDataset(
-        audio_dir=args.audio_dir,
-        annotations_file=args.annotations,
-        mel_spectrogram=DEFAULT_MEL_SPECTROGRAM,
-        target_sample_rate=SAMPLE_RATE,
-        num_samples=WINDOW_SIZE,
-        device=DEVICE,
-    )
-    input_shape = spd.shape()
-    dataloader = DataLoader(spd, batch_size=BATCH_SIZE)
+    hf_dataset = load_dataset(
+        path="samplr/audio-obfuscation",
+        split="train_1",
+        streaming=True,
+    ).with_format("torch")
+    assert hf_dataset.features["anchor"] == hf_dataset.features["positive"]
+    input_shape = hf_dataset.features["anchor"].shape
+    dataloader = DataLoader(hf_dataset, batch_size=BATCH_SIZE)
 
     model = EncoderNet(
         conv_layer_dims=CONV_LAYER_DIMS,
