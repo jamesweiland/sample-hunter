@@ -148,6 +148,13 @@ def parse_args() -> argparse.Namespace:
         "--token", type=str, help="Your huggingface token", default=HF_TOKEN
     )
 
+    parser.add_argument(
+        "--tensorboard",
+        type=Path,
+        help="The path to the log directory for tensorboard",
+        default=TRAIN_LOG_DIR,
+    )
+
     return parser.parse_args()
 
 
@@ -193,6 +200,7 @@ if __name__ == "__main__":
         test_dataloader=test_dataloader,
         optimizer=adam,
         loss_fn=triplet_loss,
+        log_dir=args.tensorboard,
         device=DEVICE,
         num_epochs=NUM_EPOCHS,
         alpha=ALPHA,
