@@ -1,9 +1,10 @@
+import random
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Union
 import argparse
 from pathlib import Path
 from datasets import load_dataset, IterableDataset
@@ -13,25 +14,19 @@ from sample_hunter.pipeline.encoder_net import EncoderNet
 from sample_hunter.pipeline.triplet_loss import mine_negative_triplet, triplet_accuracy
 from sample_hunter.pipeline.evaluate import evaluate
 from sample_hunter._util import (
-    ANNOTATIONS_PATH,
-    AUDIO_DIR,
     MODEL_SAVE_PATH,
     CONV_LAYER_DIMS,
-    DIVIDE_AND_ENCODE_HIDDEN_DIM,
-    EMBEDDING_DIM,
-    NUM_BRANCHES,
-    PADDING,
-    POOL_KERNEL_SIZE,
-    STRIDE,
-    WINDOW_SIZE,
-    SAMPLE_RATE,
-    LEARNING_RATE,
-    NUM_EPOCHS,
-    ALPHA,
-    BATCH_SIZE,
-    DEFAULT_MEL_SPECTROGRAM,
+    DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
+    DEFAULT_EMBEDDING_DIM,
+    DEFAULT_NUM_BRANCHES,
+    DEFAULT_PADDING,
+    DEFAULT_POOL_KERNEL_SIZE,
+    DEFAULT_STRIDE,
+    DEFAULT_LEARNING_RATE,
+    DEFAULT_NUM_EPOCHS,
+    DEFAULT_ALPHA,
+    DEFAULT_BATCH_SIZE,
     DEVICE,
-    DEFAULT_TEST_SPLIT,
     TRAIN_LOG_DIR,
     PROCS,
     HF_DATASET,
@@ -46,6 +41,7 @@ def train_single_epoch(
     optimizer: torch.optim.Optimizer,
     device: str,
     alpha: float,
+    writer: SummaryWriter | None = None,
 ) -> Tuple[float, float]:
     """
     Train `model` for a single epoch. Returns a (loss, accuracy) tuple
@@ -78,6 +74,17 @@ def train_single_epoch(
         loss.backward()
         optimizer.step()
 
+        accuracy = triplet_accuracy(
+            anchor=anchor_embeddings,
+            positive=positive_embeddings,
+            negative=negative_embeddings,
+            alpha=alpha,
+        )
+
+        if writer:
+            writer.add_scalar("Training loss", loss.item(), num_batches)
+            writer.add_scalar("Training accuracy", accuracy, num_batches)
+
         epoch_total_loss += loss.item()
         epoch_total_accuracy += triplet_accuracy(
             anchor=anchor_embeddings,
@@ -100,9 +107,10 @@ def train(
     loss_fn: Callable,
     optimizer: torch.optim.Optimizer,
     test_dataloader: DataLoader | None = None,
+    tensorboard: str = "none",
     device: str = DEVICE,
-    num_epochs: int = NUM_EPOCHS,
-    alpha: float = ALPHA,
+    num_epochs: int = DEFAULT_NUM_EPOCHS,
+    alpha: float = DEFAULT_ALPHA,
     log_dir: Path = TRAIN_LOG_DIR,
 ):
     writer = SummaryWriter(log_dir=log_dir)
@@ -116,8 +124,9 @@ def train(
             device=device,
             alpha=alpha,
         )
-        writer.add_scalar("Training loss", loss, i)
-        writer.add_scalar("Training accuracy", accuracy, i)
+        if tensorboard == "epoch":
+            writer.add_scalar("Training loss", loss, i)
+            writer.add_scalar("Training accuracy", accuracy, i)
 
         if test_dataloader is not None:
             # evaluate accuracy as we go on the test set
@@ -150,11 +159,90 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--tensorboard",
+        "--procs",
+        type=int,
+        help="The number of processes to use for multiprocessing",
+        default=PROCS,
+    )
+
+    tensorboard = parser.add_argument_group("tensorboard")
+    tensorboard.add_argument(
+        "--log-dir",
         type=Path,
         help="The path to the log directory for tensorboard",
         default=TRAIN_LOG_DIR,
     )
+    tensorboard.add_argument(
+        "--tensorboard",
+        help="Specify whether to write tensorboard data per batch, epoch, or not at all",
+        type=str,
+        choices=["none", "batch", "epoch"],
+    )
+
+    hyperparams = parser.add_argument_group("Network hyperparameters")
+    hyperparams.add_argument(
+        "--num-epochs",
+        type=int,
+        help="The number of epochs to train the model for",
+        default=DEFAULT_NUM_EPOCHS,
+    )
+    hyperparams.add_argument(
+        "--stride",
+        help="The stride of the convolutional kernel",
+        type=int,
+        default=DEFAULT_STRIDE,
+    )
+    hyperparams.add_argument(
+        "--padding",
+        help="The padding for the convolutions",
+        type=int,
+        default=DEFAULT_PADDING,
+    )
+    hyperparams.add_argument(
+        "--pool-kernel-size",
+        help="The kernel size to use for pooling",
+        type=int,
+        default=DEFAULT_POOL_KERNEL_SIZE,
+    )
+    hyperparams.add_argument(
+        "--num-branches",
+        help="The number of parallel branches to use in the divide and encode layer",
+        type=int,
+        default=DEFAULT_NUM_BRANCHES,
+    )
+    hyperparams.add_argument(
+        "--hidden-dim",
+        help="The hidden dimension of the divide and encode layer",
+        default=DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
+        type=int,
+    )
+    hyperparams.add_argument(
+        "--embedding-dim",
+        help="The dimension of the output embeddings",
+        type=int,
+        default=DEFAULT_EMBEDDING_DIM,
+    )
+    hyperparams.add_argument(
+        "--alpha",
+        help="The margin to use for triplet loss and mining",
+        type=float,
+        default=DEFAULT_ALPHA,
+    )
+    hyperparams.add_argument(
+        "--learning-rate",
+        help="The learning rate of the optimizer",
+        type=float,
+        default=DEFAULT_LEARNING_RATE,
+    )
+    hyperparams.add_argument(
+        "--batch-size",
+        help="The batch size for the dataloader",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+    )
+
+    dev = parser.add_argument_group("dev")
+    dev.add_argument("--num", help="train only a sample of the dataset", type=int)
 
     return parser.parse_args()
 
@@ -170,6 +258,10 @@ if __name__ == "__main__":
         path=args.repo_id, split="test_1", streaming=True, token=args.token
     ).with_format("torch")
 
+    if args.num:
+        train_dataset = train_dataset.shuffle()
+        train_dataset = train_dataset.take(args.num)
+
     assert isinstance(train_dataset, IterableDataset) and isinstance(
         test_dataset, IterableDataset
     )
@@ -177,22 +269,22 @@ if __name__ == "__main__":
 
     input_shape = train_dataset.features["anchor"].shape  # type: ignore
     train_dataloader = DataLoader(
-        train_dataset, batch_size=BATCH_SIZE, num_workers=PROCS  # type: ignore
+        train_dataset, batch_size=args.batch_size, num_workers=PROCS  # type: ignore
     )
-    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, num_workers=PROCS)  # type: ignore
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=args.procs)  # type: ignore
 
     model = EncoderNet(
         conv_layer_dims=CONV_LAYER_DIMS,
-        stride=STRIDE,
-        padding=PADDING,
-        pool_kernel_size=POOL_KERNEL_SIZE,
-        num_branches=NUM_BRANCHES,
-        divide_and_encode_hidden_dim=DIVIDE_AND_ENCODE_HIDDEN_DIM,
-        embedding_dim=EMBEDDING_DIM,
+        stride=args.stride,
+        padding=args.padding,
+        pool_kernel_size=args.pool_kernel_size,
+        num_branches=args.num_branches,
+        divide_and_encode_hidden_dim=args.hidden_dim,
+        embedding_dim=args.embedding_dim,
         input_shape=input_shape,
     ).to(DEVICE)
 
-    adam = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    adam = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     triplet_loss = nn.TripletMarginLoss()
 
     train(
@@ -201,10 +293,11 @@ if __name__ == "__main__":
         test_dataloader=test_dataloader,
         optimizer=adam,
         loss_fn=triplet_loss,
-        log_dir=args.tensorboard,
+        log_dir=args.log_dir,
+        tensorboard=args.tensorboard,
         device=DEVICE,
-        num_epochs=NUM_EPOCHS,
-        alpha=ALPHA,
+        num_epochs=args.num_epochs,
+        alpha=args.alpha,
     )
 
     torch.save(model.state_dict(), args.out)

@@ -30,9 +30,9 @@ DEFAULT_MEL_SPECTROGRAM = MelSpectrogram(
 )
 
 # CNN hyperparameters
-STRIDE: int = 1
-PADDING: int = 1
-POOL_KERNEL_SIZE: int = 2
+DEFAULT_STRIDE: int = 1
+DEFAULT_PADDING: int = 1
+DEFAULT_POOL_KERNEL_SIZE: int = 2
 CONV_LAYER_DIMS: List[Tuple[int, int]] = [
     (1, 16),
     (16, 32),
@@ -40,14 +40,14 @@ CONV_LAYER_DIMS: List[Tuple[int, int]] = [
     (64, 128),
     (128, 256),
 ]
-NUM_BRANCHES: int = 4
-DIVIDE_AND_ENCODE_HIDDEN_DIM: int = 192
-EMBEDDING_DIM: int = 96
+DEFAULT_NUM_BRANCHES: int = 4
+DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM: int = 192
+DEFAULT_EMBEDDING_DIM: int = 96
 # it is important to use a very large batch size for triplet mining
-BATCH_SIZE: int = 1_000
-LEARNING_RATE: float = 0.005
-NUM_EPOCHS: int = 10
-ALPHA: float = 0.2
+DEFAULT_BATCH_SIZE: int = 1_000
+DEFAULT_LEARNING_RATE: float = 0.005
+DEFAULT_NUM_EPOCHS: int = 10
+DEFAULT_ALPHA: float = 0.2
 DEFAULT_TEST_SPLIT: float = 0.25
 
 
