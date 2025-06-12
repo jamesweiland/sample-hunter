@@ -6,25 +6,45 @@ in the huggingface dataset.
 import torch
 import torchaudio
 from torch import Tensor
-from typing import Generator
-from datasets import Audio
+from typing import Dict, Generator, List
+from datasets import Audio, load_dataset
+from torch.utils.data import DataLoader
 
-from sample_hunter._util import DEVICE
+from sample_hunter._util import DEVICE, DEFAULT_MEL_SPECTROGRAM
+
+
+def collate_spectrograms(batch: List[Dict[str, Tensor]]) -> Tensor:
+    """
+    Collate a batch of mappings of transformed tensors before passing to the dataloader.
+
+    This function expects tensors with shape (batch_size, num_windows, num_channels, n_mels, time_frames)
+    and returns a tensor with shape (new_batch_size, num_channels, n_mels, time_frames)
+    """
+    print("First batch element shape:")
+    print(batch[0]["transformed"].shape)
+    print("Second batch element shape:")
+    print(batch[1]["transformed"].shape)
+
+    return torch.cat([example["transformed"] for example in batch], dim=0)
 
 
 def hf_audio_to_spectrogram(
-    audio: Audio,
+    example,
+    audio_field_name: str,
     target_sampling_rate: int,
     window_sample_size: int,
     window_step_size: int,
     mel_spectrogram: torchaudio.transforms.MelSpectrogram,
     device: str = DEVICE,
-) -> Generator[Tensor, None, None]:
+) -> Dict[str, Tensor]:
     """
     Perform the necessary pre-processing
     operations from a huggingface Audio object
-    on the audio and transform it to several spectrograms
+    on the audio and transform it to several spectrograms.
+    Returns the example with a new field `transformed` that contains the transformed tensor.
+    The tensor that is returned has shape (num_windows, num_channels, n_mels, time_frames)
     """
+    audio = example[audio_field_name]
     signal, sr = (
         torch.tensor(audio["array"], dtype=torch.float32, device=device),  # type: ignore
         audio["sampling_rate"],  # type: ignore
@@ -38,8 +58,10 @@ def hf_audio_to_spectrogram(
     # make windows with overlay
     signal = create_windows(signal, window_sample_size, window_step_size)
 
-    for window in signal:
-        yield mel_spectrogram(window)
+    return {
+        **example,
+        "transformed": torch.stack([mel_spectrogram(window) for window in signal]),
+    }
 
 
 def prepare_and_obfuscate_spectrograms() -> Generator[Tensor, None, None]:
@@ -76,7 +98,31 @@ def create_windows(signal: Tensor, size: int, step: int) -> Tensor:
     if remaining_samples > 0:
         last_segment = signal[:, (num_windows - 1) * step + size :]
         num_missing_samples = size - remaining_samples
-        padded_segment = torch.nn.functional.pad(last_segment, (0, num_missing_samples))
+        padded_segment = torch.nn.functional.pad(
+            last_segment, (0, num_missing_samples)
+        ).unsqueeze(1)
         windows = torch.cat([windows, padded_segment], dim=1)
 
     return windows.transpose(0, 1)
+
+
+if __name__ == "__main__":
+    # test hf_audio_to_spectrogram and the collate fn
+    ds = load_dataset("samplr/songs", streaming=True, split="train")
+    ds = ds.map(
+        hf_audio_to_spectrogram,
+        fn_kwargs={
+            "audio_field_name": "audio",
+            "target_sampling_rate": 44_100,
+            "window_sample_size": 44_100 * 2,
+            "window_step_size": 44_100 * 1,
+            "mel_spectrogram": DEFAULT_MEL_SPECTROGRAM,
+        },
+    )
+
+    dataloader = DataLoader(ds, batch_size=2, collate_fn=collate_spectrograms)
+
+    for batch in dataloader:
+        print("Concatenated batch shape:")
+        print(batch.size())
+        exit()
