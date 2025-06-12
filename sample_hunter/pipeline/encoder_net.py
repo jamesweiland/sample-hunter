@@ -6,13 +6,13 @@ from typing import List, Tuple
 
 from sample_hunter.pipeline.song_pairs_dataset import SongPairsDataset
 from sample_hunter._util import (
-    STRIDE,
-    PADDING,
-    POOL_KERNEL_SIZE,
+    DEFAULT_STRIDE,
+    DEFAULT_PADDING,
+    DEFAULT_POOL_KERNEL_SIZE,
     CONV_LAYER_DIMS,
-    NUM_BRANCHES,
-    DIVIDE_AND_ENCODE_HIDDEN_DIM,
-    EMBEDDING_DIM,
+    DEFAULT_NUM_BRANCHES,
+    DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
+    DEFAULT_EMBEDDING_DIM,
     DEVICE,
     AUDIO_DIR,
     ANNOTATIONS_PATH,
@@ -27,12 +27,12 @@ class EncoderNet(nn.Module):
         self,
         input_shape: torch.Size,
         conv_layer_dims: List[Tuple[int, int]] = CONV_LAYER_DIMS,
-        stride: int = STRIDE,
-        padding: int = PADDING,
-        pool_kernel_size: int = POOL_KERNEL_SIZE,
-        num_branches: int = NUM_BRANCHES,
-        divide_and_encode_hidden_dim: int = DIVIDE_AND_ENCODE_HIDDEN_DIM,
-        embedding_dim: int = EMBEDDING_DIM,
+        stride: int = DEFAULT_STRIDE,
+        padding: int = DEFAULT_PADDING,
+        pool_kernel_size: int = DEFAULT_POOL_KERNEL_SIZE,
+        num_branches: int = DEFAULT_NUM_BRANCHES,
+        divide_and_encode_hidden_dim: int = DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
+        embedding_dim: int = DEFAULT_EMBEDDING_DIM,
     ):
         super().__init__()
 
@@ -113,12 +113,12 @@ if __name__ == "__main__":
 
     model = EncoderNet(
         conv_layer_dims=CONV_LAYER_DIMS,
-        stride=STRIDE,
-        padding=PADDING,
-        pool_kernel_size=POOL_KERNEL_SIZE,
-        num_branches=NUM_BRANCHES,
-        divide_and_encode_hidden_dim=DIVIDE_AND_ENCODE_HIDDEN_DIM,
-        embedding_dim=EMBEDDING_DIM,
+        stride=DEFAULT_STRIDE,
+        padding=DEFAULT_PADDING,
+        pool_kernel_size=DEFAULT_POOL_KERNEL_SIZE,
+        num_branches=DEFAULT_NUM_BRANCHES,
+        divide_and_encode_hidden_dim=DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
+        embedding_dim=DEFAULT_EMBEDDING_DIM,
         input_shape=input_shape,
     ).to(DEVICE)
 

@@ -3,13 +3,13 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 from sample_hunter.pipeline.triplet_loss import triplet_accuracy, mine_negative_triplet
-from sample_hunter._util import DEVICE, ALPHA
+from sample_hunter._util import DEVICE, DEFAULT_ALPHA
 
 
 def evaluate(
     model: nn.Module,
     dataloader: DataLoader,
-    alpha: float = ALPHA,
+    alpha: float = DEFAULT_ALPHA,
     device: str = DEVICE,
 ) -> float:
     """
