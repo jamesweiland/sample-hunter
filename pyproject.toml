@@ -29,5 +29,6 @@ dependencies = [
     "torchaudio>=2.7.1",
     "torchsummary>=1.5.1",
     "tqdm>=4.67.1",
+    "webdataset>=0.2.111",
     "ytmusicapi>=1.10.3",
 ]

@@ -124,6 +124,15 @@ wheels = [
 ]
 
 [[package]]
+name = "braceexpand"
+version = "0.1.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/54/93/badd4f5ccf25209f3fef2573073da9fe4a45a3da99fca2f800f942130c0f/braceexpand-0.1.7.tar.gz", hash = "sha256:e6e539bd20eaea53547472ff94f4fb5c3d3bf9d0a89388c4b56663aba765f705", size = 7777, upload-time = "2021-05-07T13:49:07.323Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/93/e8c04e80e82391a6e51f218ca49720f64236bc824e92152a2633b74cf7ab/braceexpand-0.1.7-py2.py3-none-any.whl", hash = "sha256:91332d53de7828103dcae5773fb43bc34950b0c8160e35e0f44c4427a3b85014", size = 5923, upload-time = "2021-05-07T13:49:05.146Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2025.4.26"
 source = { registry = "https://pypi.org/simple" }
@@ -1565,6 +1574,7 @@ dependencies = [
     { name = "torchaudio" },
     { name = "torchsummary" },
     { name = "tqdm" },
+    { name = "webdataset" },
     { name = "ytmusicapi" },
 ]
 
@@ -1594,6 +1604,7 @@ requires-dist = [
     { name = "torchaudio", specifier = ">=2.7.1" },
     { name = "torchsummary", specifier = ">=1.5.1" },
     { name = "tqdm", specifier = ">=4.67.1" },
+    { name = "webdataset", specifier = ">=0.2.111" },
     { name = "ytmusicapi", specifier = ">=1.10.3" },
 ]
 
@@ -1934,6 +1945,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/bf/7d/1172cfaa1e29beb9bf938e484c122b3bdc82e8e37b17a4f753ba6d6e009f/w3lib-2.3.1.tar.gz", hash = "sha256:5c8ac02a3027576174c2b61eb9a2170ba1b197cae767080771b6f1febda249a4", size = 49531, upload-time = "2025-01-27T14:22:10.453Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/58/dd/56f0d8af71e475ed194d702f8b4cf9cea812c95e82ad823d239023c6558c/w3lib-2.3.1-py3-none-any.whl", hash = "sha256:9ccd2ae10c8c41c7279cd8ad4fe65f834be894fe7bfdd7304b991fd69325847b", size = 21751, upload-time = "2025-01-27T14:22:09.421Z" },
+]
+
+[[package]]
+name = "webdataset"
+version = "0.2.111"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "braceexpand" },
+    { name = "numpy" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dc/13/27b4a05a01bcf96e451f624d36d3637101e92b25970295546f7d949b38e9/webdataset-0.2.111.tar.gz", hash = "sha256:5b2835386a25601307a9ded9bcc0dbd1e81a9eee017784152528e77dd8619511", size = 79970, upload-time = "2025-02-12T20:12:15.577Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6e/e1/c1140ab6533668930895512ac5cbf07972fa41ebab275f5f5cdd432bc3c7/webdataset-0.2.111-py3-none-any.whl", hash = "sha256:57a70eb5d7029303ce2262d900ee3f16443bb5e9cf25f634775ce972859bcee4", size = 85514, upload-time = "2025-02-12T20:12:12.926Z" },
 ]
 
 [[package]]
