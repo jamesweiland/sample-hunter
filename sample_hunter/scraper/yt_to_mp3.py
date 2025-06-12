@@ -22,14 +22,11 @@ class CnvMP3Exception(Exception):
         self.response = r
         super().__init__(*args)
 
-
 class VideoLimitException(CnvMP3Exception):
     pass
 
-
 class RateLimitException(CnvMP3Exception):
     pass
-
 
 class CnvMP3Client:
     """Class and context manager to interact with cnvmp3.com"""
@@ -47,7 +44,6 @@ class CnvMP3Client:
         self.session = requestium.Session(driver=self._driver)
         self.session.driver.get("https://www.cnvmp3.com/")
         self.session.transfer_driver_cookies_to_session()
-
         return self
 
     def __exit__(self, *exc):
@@ -58,10 +54,6 @@ class CnvMP3Client:
 
     @retry(tries=DEFAULT_RETRIES, delay=DEFAULT_RETRY_DELAY)
     def yt_to_mp3(self, yt_url: str) -> bytes | None:
-        """The main function for the client. Convert a YouTube link to mp3 format and download it to `download_path`
-
-        :return: the binary data representing the mp3 file
-        """
         try:
             yt_id = parse_qs(urlparse(yt_url).query)["v"][0]
             r = self.check_database(yt_id)
@@ -74,13 +66,11 @@ class CnvMP3Client:
                 print(f"get video data {video_data_response.status_code}")
                 video_data = video_data_response.json()
                 if video_data["success"]:
-                    # get title so we can insert to db later
                     title = video_data["title"]
                     download_video_ucep_response = self.download_video_ucep(
                         title=video_data["title"], yt_url=yt_url
                     )
                     print(f"download video ucep {r.status_code}")
-
                     r = download_video_ucep_response.json()
                     if r["success"]:
                         print("Download video ucep was successful")
@@ -88,7 +78,6 @@ class CnvMP3Client:
                         self.insert_to_database(yt_id, title, r["download_link"])
                         return download
                     elif r["errorType"] == 3:
-                        # youtube errors
                         raise CnvMP3Exception(
                             download_video_ucep_response,
                             f"YouTube had an error downloading {yt_url}",
@@ -126,7 +115,6 @@ class CnvMP3Client:
             "Sec-Fetch-User": "?1",
             "Accept-Language": "en-US,en;q=0.9",
             "Cache-Control": "no-cache",
-            # "Host": "apio8dlp.cnvmp3.online",
             "Pragma": "no-cache",
             "Referer": "https://cnvmp3.com/",
             "Upgrade-Insecure-Requests": "1",
@@ -194,56 +182,20 @@ class CnvMP3Client:
                 raise RateLimitException(r)
             raise CnvMP3Exception(r, f"Failed to insert db for {yt_id}")
 
-
 def write_to_disk(bytes: bytes, path: Path) -> None:
     with open(path, "wb") as file:
         file.write(bytes)
 
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--in",
-        help="The path to the JSON or CSV file to get mp3 files for",
-        dest="in_",
-        type=Path,
-        default=Path(DATA_SAVE_DIR / "sampling_songs.csv"),
-    )
-
-    parser.add_argument(
-        "--headless",
-        help="Open the selenium driver as a headless instance",
-        action="store_true",
-    )
-
-    parser.add_argument(
-        "--single",
-        help="Option to pass a single URL to process, for debugging",
-        type=str,
-    )
-
-    parser.add_argument(
-        "--append",
-        help="Option to not process rows that already have a path",
-        action="store_true",
-    )
-
-    return parser.parse_args()
-
-CNVMP3_DOMAIN = "https://cnvmp3.com/"
-RATE_LIMIT_TIMEOUT: float = 60.0
-
-# ... [CnvMP3Exception, VideoLimitException, RateLimitException, CnvMP3Client, write_to_disk: UNCHANGED] ...
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+    # --- The only change: Use script folder for default input ---
+    SCRIPT_DIR = Path(__file__).parent
     parser.add_argument(
         "--in",
         help="The path to the CSV file to get mp3 files for",
         dest="in_",
         type=Path,
-        default=Path(DATA_SAVE_DIR / "query_list_with_urls.csv"),
+        default=SCRIPT_DIR / "query_list_with_urls.csv",
     )
     parser.add_argument(
         "--headless",
@@ -255,7 +207,15 @@ def parse_args() -> argparse.Namespace:
         help="Option to pass a single URL to process, for debugging",
         type=str,
     )
+    parser.add_argument(
+        "--append",
+        help="Option to not process rows that already have a path",
+        action="store_true",
+    )
     return parser.parse_args()
+
+CNVMP3_DOMAIN = "https://cnvmp3.com/"
+RATE_LIMIT_TIMEOUT: float = 60.0
 
 if __name__ == "__main__":
     args = parse_args()

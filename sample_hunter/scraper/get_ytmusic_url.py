@@ -1,6 +1,7 @@
 import pandas as pd
 from ytmusicapi import YTMusic
 import time
+import subprocess
 
 def main():
     df = pd.read_csv('query_list.csv')
@@ -31,6 +32,9 @@ def main():
     df['yt_url'] = yt_urls
     df.to_csv('query_list_with_urls.csv', index=False)
     print("Saved with YouTube URLs!")
+
+    # --- Call the duplicate cleaner ---
+    subprocess.run(['python3', 'clean_duplicates.py', 'query_list_with_urls.csv'])
 
 if __name__ == "__main__":
     main()
