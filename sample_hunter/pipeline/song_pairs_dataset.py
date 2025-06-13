@@ -10,9 +10,9 @@ import torchaudio
 from sample_hunter._util import (
     read_into_df,
     DEFAULT_SAMPLE_RATE,
-    N_FFT,
-    HOP_LENGTH,
-    N_MELS,
+    DEFAULT_N_FFT,
+    DEFAULT_HOP_LENGTH,
+    DEFAULT_N_MELS,
     plot_spectrogram,
     DEFAULT_WINDOW_NUM_SAMPLES,
     DEVICE,
@@ -142,9 +142,9 @@ if __name__ == "__main__":
 
     mel_spectrogram = MelSpectrogram(
         sample_rate=DEFAULT_SAMPLE_RATE,
-        n_fft=N_FFT,
-        hop_length=HOP_LENGTH,
-        n_mels=N_MELS,
+        n_fft=DEFAULT_N_FFT,
+        hop_length=DEFAULT_HOP_LENGTH,
+        n_mels=DEFAULT_N_MELS,
     )
 
     dataset = SongPairsDataset(

@@ -14,9 +14,9 @@ import pandas as pd
 
 # pipeline hyperparameters
 DEFAULT_SAMPLE_RATE: int = 44_100  # 44.1 kHz
-N_FFT: int = 1024
-HOP_LENGTH: int = 512
-N_MELS: int = 64
+DEFAULT_N_FFT: int = 1024
+DEFAULT_HOP_LENGTH: int = 512
+DEFAULT_N_MELS: int = 64
 STEP_LENGTH: float = 1.0  # the seconds of overlay with previous spectrograms
 SPECTROGRAM_WIDTH: float = 2.0  # how many seconds each spectrogram represents
 NUM_FOLDS: int = 5
@@ -29,7 +29,10 @@ DEFAULT_STEP_NUM_SAMPLES: int = int(
 )  # 1 second overlay between windows
 DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
 DEFAULT_MEL_SPECTROGRAM = MelSpectrogram(
-    sample_rate=DEFAULT_SAMPLE_RATE, n_fft=N_FFT, hop_length=HOP_LENGTH, n_mels=N_MELS
+    sample_rate=DEFAULT_SAMPLE_RATE,
+    n_fft=DEFAULT_N_FFT,
+    hop_length=DEFAULT_HOP_LENGTH,
+    n_mels=DEFAULT_N_MELS,
 )
 
 # CNN hyperparameters

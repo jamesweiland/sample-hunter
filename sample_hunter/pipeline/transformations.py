@@ -6,6 +6,8 @@ in the huggingface dataset.
 import multiprocessing
 import random
 import tempfile
+import time
+import numpy as np
 import torch
 import torchaudio
 from torchaudio.transforms import MelSpectrogram
@@ -18,6 +20,9 @@ from pydantic import BaseModel, field_validator
 from sox import Transformer, Combiner
 
 from sample_hunter._util import (
+    DEFAULT_HOP_LENGTH,
+    DEFAULT_N_FFT,
+    DEFAULT_N_MELS,
     DEVICE,
     DEFAULT_MEL_SPECTROGRAM,
     DEFAULT_SAMPLE_RATE,
@@ -260,6 +265,9 @@ class SpectrogramPreprocessor:
         target_sample_rate: int = DEFAULT_SAMPLE_RATE,
         window_sample_size: int = DEFAULT_WINDOW_NUM_SAMPLES,
         window_step_size: int = DEFAULT_STEP_NUM_SAMPLES,
+        n_fft: int = DEFAULT_N_FFT,
+        hop_length: int = DEFAULT_HOP_LENGTH,
+        n_mels: int = DEFAULT_N_MELS,
         obfuscator: Obfuscator = Obfuscator(),
         num_workers: int = PROCS,
         device: str = DEVICE,
@@ -279,6 +287,9 @@ class SpectrogramPreprocessor:
         self.target_sample_rate = target_sample_rate
         self.window_num_samples = window_sample_size
         self.step_num_samples = window_step_size
+        self.n_fft = n_fft
+        self.hop_length = hop_length
+        self.n_mels = n_mels
         self.device = device
         self.obfuscator = obfuscator
         self.num_workers = num_workers
@@ -292,14 +303,13 @@ class SpectrogramPreprocessor:
         """
         Update `example` with fields for preprocessed data.
         """
-        print("Entered __getitem__")
 
         if isinstance(data, Dict):
             # it is a huggingface Audio object
-            signal = torch.tensor(
-                data["array"], dtype=torch.float32, device=self.device
-            ).unsqueeze(
-                0
+            signal = (
+                torch.tensor(data["array"], dtype=torch.float32, device=self.device)
+                .unsqueeze(0)
+                .to(self.device)
             )  # hf audio arrays are 1d
             return self.transform(
                 signal=signal, sample_rate=data["sampling_rate"], obfuscate=obfuscate
@@ -307,6 +317,7 @@ class SpectrogramPreprocessor:
         else:
             # if a tensor is passed, a sample_rate has to be passed too
             assert sample_rate is not None
+            data = data.to(self.device)
             return self.transform(
                 signal=data, sample_rate=sample_rate, obfuscate=obfuscate
             )
@@ -329,25 +340,15 @@ class SpectrogramPreprocessor:
         # make windows with overlay
         signal = self.create_windows(signal)
 
-        print("Starting multiprocessing")
-        with multiprocessing.Pool(processes=self.num_workers) as pool:
-
-            def f(window):
-                """Worker for multiprocessing for positive"""
-                return self.mel_spectrogram(self.obfuscate_window(window))
-
-            anchor = torch.stack(pool.map(self.mel_spectrogram, signal))
-            if obfuscate:
-                # obfuscate each window
-                positive = torch.stack(
-                    pool.map(
-                        f,
-                        signal,
-                    )
-                )
-                return positive, anchor
-            # if not obfuscate, just return the regular transformation
-            return anchor
+        anchor = self.mel_spectrogram(signal)
+        if obfuscate:
+            # obfuscate each window
+            positive = torch.stack(
+                [self.mel_spectrogram(self.obfuscator(window)) for window in signal]
+            )
+            return positive, anchor
+        # if not obfuscate, just return the regular transformation
+        return anchor
 
     def obfuscate_window(self, window: Tensor) -> Tensor:
         """
@@ -412,7 +413,23 @@ class SpectrogramPreprocessor:
             )
             windows = torch.cat([windows, last_segment], dim=1)
 
-        return windows.transpose(0, 1)
+        return windows.transpose(0, 1).to(self.device)
+
+    def _worker(self, window: np.ndarray, obfuscate: bool = False) -> np.ndarray:
+        """The worker function for transforming windows into spectrograms."""
+        mel = self._create_mel()
+        if obfuscate:
+            pass
+        else:
+            return mel(window)
+
+    def _create_mel(self) -> MelSpectrogram:
+        return MelSpectrogram(
+            sample_rate=self.target_sample_rate,
+            n_fft=self.n_fft,
+            n_mels=self.n_mels,
+            hop_length=self.hop_length,
+        ).to(self.device)
 
     @staticmethod
     def collate_spectrograms(
@@ -446,23 +463,23 @@ if __name__ == "__main__":
     )
     print("dataloader done, starting loop")
     for batch in dataloader:
+
         print("Concatenated batch shape:")
         print(batch.size())
-        break
 
-    # test the obfuscation stuff
-    obf_ds = load_dataset("samplr/songs", streaming=True, split="train")
-    obf_ds = obf_ds.map(
-        lambda ex: (
-            lambda signals: {**ex, "positive": signals[0], "anchor": signals[1]}
-        )(preprocessor(ex["audio"], obfuscate=True))
-    )
+    # # test the obfuscation stuff
+    # obf_ds = load_dataset("samplr/songs", streaming=True, split="train")
+    # obf_ds = obf_ds.map(
+    #     lambda ex: (
+    #         lambda signals: {**ex, "positive": signals[0], "anchor": signals[1]}
+    #     )(preprocessor(ex["audio"], obfuscate=True))
+    # )
 
-    dataloader = DataLoader(
-        obf_ds, batch_size=2, collate_fn=SpectrogramPreprocessor.collate_spectrograms
-    )
-    for anchor, positive in dataloader:
-        print("Concatenated batch shape:")
-        print(anchor.size())
-        print(positive.size())
-        break
+    # dataloader = DataLoader(
+    #     obf_ds, batch_size=2, collate_fn=SpectrogramPreprocessor.collate_spectrograms
+    # )
+    # for anchor, positive in dataloader:
+    #     print("Concatenated batch shape:")
+    #     print(anchor.size())
+    #     print(positive.size())
+    #     break
