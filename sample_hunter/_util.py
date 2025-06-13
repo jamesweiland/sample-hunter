@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 import pandas as pd
 
 # pipeline hyperparameters
-SAMPLE_RATE: int = 44_100  # 44.1 kHz
+DEFAULT_SAMPLE_RATE: int = 44_100  # 44.1 kHz
 N_FFT: int = 1024
 HOP_LENGTH: int = 512
 N_MELS: int = 64
@@ -21,11 +21,15 @@ STEP_LENGTH: float = 1.0  # the seconds of overlay with previous spectrograms
 SPECTROGRAM_WIDTH: float = 2.0  # how many seconds each spectrogram represents
 NUM_FOLDS: int = 5
 SNIPPET_LENGTH: float = 8.0  # number of seconds of each input
-WINDOW_SIZE: int = int(SAMPLE_RATE * SPECTROGRAM_WIDTH)  # 2 seconds per window
-STEP_SIZE: int = int(SAMPLE_RATE * STEP_LENGTH)  # 1 second overlay between windows
+DEFAULT_WINDOW_NUM_SAMPLES: int = int(
+    DEFAULT_SAMPLE_RATE * SPECTROGRAM_WIDTH
+)  # 2 seconds per window
+DEFAULT_STEP_NUM_SAMPLES: int = int(
+    DEFAULT_SAMPLE_RATE * STEP_LENGTH
+)  # 1 second overlay between windows
 DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
 DEFAULT_MEL_SPECTROGRAM = MelSpectrogram(
-    sample_rate=SAMPLE_RATE, n_fft=N_FFT, hop_length=HOP_LENGTH, n_mels=N_MELS
+    sample_rate=DEFAULT_SAMPLE_RATE, n_fft=N_FFT, hop_length=HOP_LENGTH, n_mels=N_MELS
 )
 
 # CNN hyperparameters

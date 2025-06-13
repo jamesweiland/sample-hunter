@@ -9,12 +9,12 @@ import torchaudio
 
 from sample_hunter._util import (
     read_into_df,
-    SAMPLE_RATE,
+    DEFAULT_SAMPLE_RATE,
     N_FFT,
     HOP_LENGTH,
     N_MELS,
     plot_spectrogram,
-    WINDOW_SIZE,
+    DEFAULT_WINDOW_NUM_SAMPLES,
     DEVICE,
     DEFAULT_MEL_SPECTROGRAM,
 )
@@ -34,8 +34,8 @@ class SongPairsDataset(Dataset):
         audio_dir: Path,
         annotations_file: Path | pd.DataFrame,
         mel_spectrogram: MelSpectrogram = DEFAULT_MEL_SPECTROGRAM,
-        target_sample_rate: int = SAMPLE_RATE,
-        num_samples: int = WINDOW_SIZE,
+        target_sample_rate: int = DEFAULT_SAMPLE_RATE,
+        num_samples: int = DEFAULT_WINDOW_NUM_SAMPLES,
         device: str = DEVICE,
     ):
         """Initialize a SongPairs dataset. Each pair consists of an original audio
@@ -141,7 +141,10 @@ if __name__ == "__main__":
     # test SongPairs
 
     mel_spectrogram = MelSpectrogram(
-        sample_rate=SAMPLE_RATE, n_fft=N_FFT, hop_length=HOP_LENGTH, n_mels=N_MELS
+        sample_rate=DEFAULT_SAMPLE_RATE,
+        n_fft=N_FFT,
+        hop_length=HOP_LENGTH,
+        n_mels=N_MELS,
     )
 
     dataset = SongPairsDataset(
@@ -150,8 +153,8 @@ if __name__ == "__main__":
             "/home/james/code/sample-hunter/_data/new_annotations.csv"
         ),
         mel_spectrogram=mel_spectrogram,
-        target_sample_rate=SAMPLE_RATE,
-        num_samples=WINDOW_SIZE,
+        target_sample_rate=DEFAULT_SAMPLE_RATE,
+        num_samples=DEFAULT_WINDOW_NUM_SAMPLES,
         device=DEVICE,
     )
 
