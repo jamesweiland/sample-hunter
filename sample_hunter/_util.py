@@ -72,6 +72,7 @@ DEFAULT_REQUEST_TIMEOUT: float = 15.0
 DEFAULT_DOWNLOAD_TIME: float = 2700.0
 DEFAULT_RETRIES: int = 5
 DEFAULT_RETRY_DELAY: float = 5.0
+CACHE_DIR: Path = Path(DATA_SAVE_DIR / "cache")
 THREADS: int = 1
 PROCS: int = multiprocessing.cpu_count()
 

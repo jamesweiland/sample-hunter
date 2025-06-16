@@ -3,10 +3,13 @@ Custom generator functions to transform/pre-process data that is sitting
 in the huggingface dataset.
 """
 
+from functools import cached_property
+import math
 import multiprocessing
 import random
 import tempfile
 import time
+import memray
 import numpy as np
 import torch
 import torchaudio
@@ -14,7 +17,7 @@ from torchaudio.transforms import MelSpectrogram
 from torch import Tensor
 from typing import Dict, List, Tuple, Union
 from pathlib import Path
-from datasets import load_dataset
+from datasets import load_dataset, Audio
 from torch.utils.data import DataLoader
 from pydantic import BaseModel, field_validator
 from sox import Transformer, Combiner
@@ -29,6 +32,7 @@ from sample_hunter._util import (
     DEFAULT_WINDOW_NUM_SAMPLES,
     DEFAULT_STEP_NUM_SAMPLES,
     PROCS,
+    CACHE_DIR,
 )
 
 
@@ -111,14 +115,30 @@ class Obfuscator(BaseModel):
     """
 
     tempo_range: Tuple[float, float] = (0.6, 1.5)
-    pitch_range: Tuple[float, float] = (0.6, 1.5)
+    pitch_range: Tuple[int, int] = (-24, 24)
     reverb_range: Tuple[int, int] = (40, 100)
     lowpass_range: Tuple[int, int] = (1000, 3000)
     highpass_range: Tuple[int, int] = (500, 1500)
-    whitenoise_range: Tuple[float, float] = (0.05, 0.35)
-    pinknoise_range: Tuple[float, float] = (0.05, 0.35)
+    whitenoise_range: Tuple[float, float] = (0.05, 0.25)
+    pinknoise_range: Tuple[float, float] = (0.05, 0.25)
     lowpass_frac: float = 0.5
     whitenoise_frac: float = 0.5
+    n_fft: int = DEFAULT_N_FFT
+    hop_length: int = DEFAULT_HOP_LENGTH
+    device: str = DEVICE
+    # num_workers: int = 1
+
+    # @field_validator("num_workers")
+    # def check_num_workers(cls, v, field):
+    #     if v <= multiprocessing.cpu_count():
+    #         return v
+    #     raise ValueError(
+    #         f"num_workers is greater than number of available cores: {v} > {multiprocessing.cpu_count()}"
+    #     )
+
+    @cached_property
+    def window(self):
+        return torch.hann_window(window_length=self.n_fft, device=self.device)
 
     @field_validator(
         "tempo_range",
@@ -144,113 +164,96 @@ class Obfuscator(BaseModel):
             raise ValueError(f"{field.name} must be between 0 and 1")
         return v
 
-    def __call__(self, signal: Tensor | Path, sample_rate: int | None = None) -> Tensor:
+    def __call__(
+        self, batch: Tensor, sample_rate: int, return_complex_spec: bool = False
+    ) -> Tensor:
         """
-        Accepts either a torch.tensor or a path to an audio file,
+        Accepts a torch.tensor
         and returns the obfuscated tensor.
         """
-        tmp_files = ["ob", "noise", "out"]
-        with TempfileContext(files=tmp_files, suffix=".mp3") as tmp:
-            if isinstance(signal, Tensor):
-                # sox needs audio paths
-                assert sample_rate is not None
-                tmp.append("unob")
-                torchaudio.save(
-                    uri=tmp.unob,
-                    src=signal,
-                    sample_rate=sample_rate,
-                    backend="ffmpeg",
-                    format="mp3",
-                )
-                signal = tmp.unob
-            return self.obfuscate(signal, tmp)
+        with torch.no_grad():
+            print(f"Received shape: {batch.shape}")
+            batch = batch.contiguous() if not batch.is_contiguous() else batch
+            mods = {}
+            batch, pitch = self.pitch_distort(batch, sample_rate)
+            mods.update({"pitch": round(pitch, 2)})
+            batch, filter = self.apply_filter(batch, sample_rate)
+            mods.update(filter)
+            batch, noise_mods = self.add_noise(batch)
+            mods.update(noise_mods)
+            batch, tempo = self.time_distort(batch)  # this makes a complex spec
+            mods.update({"tempo": round(tempo, 2)})
+            if return_complex_spec:
+                print(f"Returning shape: {batch.shape}")
+                return batch
+            # convert back to audio before returning
+            return torch.istft(
+                batch, n_fft=self.n_fft, hop_length=self.hop_length, window=self.window
+            ).unsqueeze(1)
 
-    def obfuscate(self, signal: Path, tmp: TempfileContext) -> Tensor:
-        """
-        Do the heavy lifting for __call__
-        """
-        tfm, mods = self.get_transformer()
-        noise_mods = self.make_noise_like(signal, outfile=tmp.noise)
-        mods = mods.update(noise_mods)
+    def time_distort(self, signal: Tensor) -> Tuple[Tensor, float]:
+        """Apply a tempo distortion to `signal`."""
+        # rate = random.uniform(*self.tempo_range)
+        rate = 1.5
 
-        tfm.build_file(str(signal), str(tmp.ob))
+        spec = torch.stft(
+            input=signal.squeeze(1),
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            window=self.window,
+            return_complex=True,
+        )
+        freq_bins = self.n_fft // 2 + 1
+        phase_advance = torch.linspace(
+            0, math.pi * self.hop_length, freq_bins, device=self.device
+        ).unsqueeze(-1)
 
-        try:
-            combiner = Combiner().set_input_format(file_type=["mp3", "mp3"])
-            combiner.build([str(tmp.ob), str(tmp.noise)], tmp.out, "mix")  # type: ignore
-            return torchaudio.load(uri=tmp.out, backend="ffmpeg", format="mp3")[0]
-        except Exception as e:
-            print(f"An error occurred")
-            raise e
+        return (
+            torchaudio.functional.phase_vocoder(
+                complex_specgrams=spec, rate=rate, phase_advance=phase_advance
+            ),
+            rate,
+        )
 
-    def get_transformer(self) -> Tuple[Transformer, Dict[str, Union[int, float]]]:
-        """
-        Create a Sox Transformer with the instance's ranges.
+    def pitch_distort(self, signal: Tensor, sample_rate: int) -> Tuple[Tensor, float]:
+        """Apply a pitch distortion to `signal`."""
+        # pitch = random.randint(*self.pitch_range)
+        pitch = random.choice([-24, -18, -12, -6, 0, 6, 12, 18, 24])
+        signal = torchaudio.functional.pitch_shift(signal, sample_rate, n_steps=pitch)
+        return signal, pitch
 
-        Returns a tuple containing the transformer and a dictionary describing the distortions applied.
-        """
-
-        tfm = Transformer().set_globals(verbosity=1)
-        mods = {}
-
-        tempo = random.uniform(self.tempo_range[0], self.tempo_range[1])
-        if abs(tempo - 1.0) <= 0.1:
-            tfm.stretch(tempo)
+    def apply_filter(
+        self, signal: Tensor, sample_rate: int
+    ) -> Tuple[Tensor, Dict[str, int]]:
+        """Apply either a high or low pass filter to `signal`."""
+        if random.random() < self.lowpass_frac:
+            # apply low pass
+            freq = random.randint(*self.lowpass_range)
+            signal = torchaudio.functional.lowpass_biquad(signal, sample_rate, freq)
+            mods = {"lowpass": freq}
         else:
-            tfm.tempo(tempo)
-        mods["tempo"] = round(tempo, 2)
+            # apply high pass
+            freq = random.randint(*self.highpass_range)
+            signal = torchaudio.functional.highpass_biquad(signal, sample_rate, freq)
+            mods = {"highpass": freq}
+        return signal, mods
 
-        pitch = random.uniform(self.pitch_range[0], self.pitch_range[1])
-        tfm.pitch(pitch)
-        mods["pitch"] = round(pitch, 2)
-
-        reverb = random.randint(self.reverb_range[0], self.reverb_range[1])
-        tfm.reverb(reverb)
-        mods["reverb"] = reverb
-
-        if random.random() < 0.5:
-            lowpass = random.randint(self.lowpass_range[0], self.lowpass_range[1])
-            tfm.lowpass(lowpass)
-            mods["lowpass"] = lowpass
-        else:
-            highpass = random.randint(self.highpass_range[0], self.highpass_range[1])
-            tfm.highpass(highpass)
-            mods["highpass"] = highpass
-
-        return tfm, mods
-
-    def make_noise_like(
-        self, signal: Path, outfile: Path
-    ) -> Dict[str, Union[int, float]]:
-        """
-        Generate a file containing white/pink noise with the same shape as the
-        audio at `signal`.
-
-        Returns a dictionary describing the noise generated.
-        """
-        tfm = Transformer().set_globals(verbosity=1)
-        mods = {}
-
+    def add_noise(self, signal: Tensor) -> Tuple[Tensor, Dict[str, float]]:
+        """Add either white or pink noise to `signal`."""
         if random.random() < self.whitenoise_frac:
-            # White noise
-            noise_level = random.uniform(
-                self.whitenoise_range[0], self.whitenoise_range[1]
-            )
-            noise_type = "whitenoise"
-            mods["whitenoise"] = round(noise_level, 2)
+            noise_level = random.uniform(*self.whitenoise_range)
+            noise = torch.randn_like(signal) * noise_level
+            mods = {"whitenoise": round(noise_level, 2)}
         else:
-            # Pink noise
-            noise_level = random.uniform(
-                self.pinknoise_range[0], self.pinknoise_range[1]
-            )
-            noise_type = "pinknoise"
-            mods["pinknoise"] = round(noise_level, 2)
-
-        # Build the Sox synth command
-        extra_args = ["synth", noise_type, "vol", str(noise_level)]
-
-        tfm.build_file(signal, outfile, extra_args=extra_args)
-        return mods
+            noise_level = random.uniform(*self.pinknoise_range)
+            whitenoise = torch.randn_like(signal)
+            # filter whitenoise to get pinknoise
+            pinknoise = torch.cumsum(whitenoise, dim=-1)
+            pinknoise = pinknoise / pinknoise.abs().max(dim=-1, keepdim=True).values
+            noise = pinknoise * noise_level
+            mods = {"pinknoise": round(noise_level, 2)}
+        noisy_signal = signal + noise
+        return noisy_signal, mods
 
 
 class SpectrogramPreprocessor:
@@ -263,11 +266,8 @@ class SpectrogramPreprocessor:
         self,
         mel_spectrogram: MelSpectrogram = DEFAULT_MEL_SPECTROGRAM,
         target_sample_rate: int = DEFAULT_SAMPLE_RATE,
-        window_sample_size: int = DEFAULT_WINDOW_NUM_SAMPLES,
-        window_step_size: int = DEFAULT_STEP_NUM_SAMPLES,
-        n_fft: int = DEFAULT_N_FFT,
-        hop_length: int = DEFAULT_HOP_LENGTH,
-        n_mels: int = DEFAULT_N_MELS,
+        window_num_samples: int = DEFAULT_WINDOW_NUM_SAMPLES,
+        step_num_samples: int = DEFAULT_STEP_NUM_SAMPLES,
         obfuscator: Obfuscator = Obfuscator(),
         num_workers: int = PROCS,
         device: str = DEVICE,
@@ -285,14 +285,12 @@ class SpectrogramPreprocessor:
         """
         self.mel_spectrogram = mel_spectrogram
         self.target_sample_rate = target_sample_rate
-        self.window_num_samples = window_sample_size
-        self.step_num_samples = window_step_size
-        self.n_fft = n_fft
-        self.hop_length = hop_length
-        self.n_mels = n_mels
+        self.window_num_samples = window_num_samples
+        self.step_num_samples = step_num_samples
         self.device = device
         self.obfuscator = obfuscator
         self.num_workers = num_workers
+        self._resampler_cache = {}
 
     def __call__(
         self,
@@ -303,24 +301,29 @@ class SpectrogramPreprocessor:
         """
         Update `example` with fields for preprocessed data.
         """
+        print(type(data))
+        print(data)
+        with torch.no_grad():
 
-        if isinstance(data, Dict):
-            # it is a huggingface Audio object
-            signal = (
-                torch.tensor(data["array"], dtype=torch.float32, device=self.device)
-                .unsqueeze(0)
-                .to(self.device)
-            )  # hf audio arrays are 1d
-            return self.transform(
-                signal=signal, sample_rate=data["sampling_rate"], obfuscate=obfuscate
-            )
-        else:
-            # if a tensor is passed, a sample_rate has to be passed too
-            assert sample_rate is not None
-            data = data.to(self.device)
-            return self.transform(
-                signal=data, sample_rate=sample_rate, obfuscate=obfuscate
-            )
+            if isinstance(data, Dict):
+                # it is a huggingface Audio object
+                signal = torch.tensor(
+                    data["array"], dtype=torch.float16, device=self.device
+                ).to(self.device)
+                if signal.ndim == 1:
+                    signal = signal.unsqueeze(0)
+                return self.transform(
+                    signal=signal,
+                    sample_rate=data["sampling_rate"],
+                    obfuscate=obfuscate,
+                )
+            else:
+                # if a tensor is passed, a sample_rate has to be passed too
+                assert sample_rate is not None
+                data = data.to(self.device)
+                return self.transform(
+                    signal=data, sample_rate=sample_rate, obfuscate=obfuscate
+                )
 
     def transform(
         self, signal: Tensor, sample_rate: int, obfuscate: bool
@@ -330,10 +333,13 @@ class SpectrogramPreprocessor:
         operations from a huggingface Audio object
         on the audio and transform it to several spectrograms.
         Returns the example with a new field `transformed` that contains the transformed tensor.
+
+        Expects a tensor with shape (N, S), N=num_channels, S=num_samples
         The tensor that is returned has shape (num_windows, num_channels, n_mels, time_frames)
         """
         print("Entered transform")
-        # (we don't have to mix anything down because HF has done this for us)
+        # mix to mono
+        signal = self.mix_channels(signal)
 
         # resample to target sampling rate
         signal = self.resample(signal, sample_rate)
@@ -343,14 +349,13 @@ class SpectrogramPreprocessor:
         anchor = self.mel_spectrogram(signal)
         if obfuscate:
             # obfuscate each window
-            positive = torch.stack(
-                [self.mel_spectrogram(self.obfuscator(window)) for window in signal]
-            )
+
+            positive = self.mel_spectrogram(self.obfuscate_window(signal))
             return positive, anchor
         # if not obfuscate, just return the regular transformation
         return anchor
 
-    def obfuscate_window(self, window: Tensor) -> Tensor:
+    def obfuscate_window(self, signal: Tensor) -> Tensor:
         """
         Obfuscate a segment of an audio file represented as a tensor, and return
         the obfuscation as a tensor.
@@ -364,25 +369,78 @@ class SpectrogramPreprocessor:
             the obfuscation time-distorted the tensor, it will be truncated
             or padded to match the exact shape of the input
         """
-        ob_sig = self.obfuscator(window, self.target_sample_rate)
-        ob_sig = self.resize(ob_sig, window.shape[1])
+        # window = signal[0]
+        # first, split signal into chunks
+
+        ob_sig = SpectrogramPreprocessor.resize(
+            self.obfuscator(signal, self.target_sample_rate), signal.shape[-1]
+        )
+
+        # ob_sig = torch.cat(
+        #     [
+        #         SpectrogramPreprocessor.resize(
+        #             self.obfuscator(chunk, self.target_sample_rate), signal.shape[-1]
+        #         )
+        #         for chunk in self._split_into_chunks(signal)
+        #     ],
+        #     dim=0,
+        # )
+
+        print(f"Obfuscation returns shape: {ob_sig.shape}")
+
+        torchaudio.save(
+            uri="unob.mp3",
+            src=signal[0].to(torch.float32),
+            format="mp3",
+            backend="ffmpeg",
+            sample_rate=self.target_sample_rate,
+        )
+
+        torchaudio.save(
+            uri="ob.mp3",
+            src=ob_sig[0].to(torch.float32),
+            format="mp3",
+            backend="ffmpeg",
+            sample_rate=self.target_sample_rate,
+        )
+
         return ob_sig
 
-    def resample(self, signal: Tensor, sample_rate: int) -> Tensor:
-        if sample_rate != self.target_sample_rate:
-            resampler = torchaudio.transforms.Resample(
-                sample_rate, self.target_sample_rate
-            ).to(self.device)
-            return resampler(signal)
+    def mix_channels(self, signal: Tensor) -> Tensor:
+        """Mix the channels of the signal down to mono"""
+        if signal.ndim == 2:
+            channel_dim = 0
+        elif signal.ndim == 3:
+            channel_dim = 1
+        else:
+            raise ValueError(f"Unsupported tensor shape: {signal.shape}")
+        if signal.shape[channel_dim] != 1:
+            return torch.mean(signal, dim=0, keepdim=True)
         return signal
 
-    def resize(self, signal: Tensor, desired_length: int) -> Tensor:
+    def resample(self, signal: Tensor, sample_rate: int) -> Tensor:
+        torch.set_num_threads(1)
+        print("resampling")
+        if sample_rate != self.target_sample_rate:
+            if sample_rate in self._resampler_cache.keys():
+                signal = self._resampler_cache[sample_rate](sample_rate)
+            else:
+                resampler = torchaudio.transforms.Resample(
+                    sample_rate, self.target_sample_rate
+                ).to(self.device)
+                signal = resampler(signal)
+        print("resampling done")
+        torch.set_num_threads(torch.multiprocessing.cpu_count())
+        return signal
+
+    @staticmethod
+    def resize(signal: Tensor, desired_length: int) -> Tensor:
         """Set the length of the signal to the desired length"""
-        if signal.shape[1] < desired_length:
-            num_missing_samples = desired_length - signal.shape[1]
+        if signal.shape[-1] < desired_length:
+            num_missing_samples = desired_length - signal.shape[-1]
             return torch.nn.functional.pad(signal, (0, num_missing_samples))
-        if signal.shape[1] > desired_length:
-            return signal[:, :desired_length]
+        if signal.shape[-1] > desired_length:
+            return signal[..., :desired_length]
         return signal
 
     def create_windows(self, signal: Tensor) -> Tensor:
@@ -415,22 +473,6 @@ class SpectrogramPreprocessor:
 
         return windows.transpose(0, 1).to(self.device)
 
-    def _worker(self, window: np.ndarray, obfuscate: bool = False) -> np.ndarray:
-        """The worker function for transforming windows into spectrograms."""
-        mel = self._create_mel()
-        if obfuscate:
-            pass
-        else:
-            return mel(window)
-
-    def _create_mel(self) -> MelSpectrogram:
-        return MelSpectrogram(
-            sample_rate=self.target_sample_rate,
-            n_fft=self.n_fft,
-            n_mels=self.n_mels,
-            hop_length=self.hop_length,
-        ).to(self.device)
-
     @staticmethod
     def collate_spectrograms(
         batch: List[Dict[str, Tensor]],
@@ -448,38 +490,63 @@ class SpectrogramPreprocessor:
             [example["positive"] for example in batch], dim=0
         )
 
+    def _split_into_chunks(self, signal: Tensor) -> Tuple[Tensor, ...]:
+        """
+        Split a tensor into chunks, with a maximum size of self.max_chunk_bytes
+
+        """
+        elements_per_window = signal.shape[-1] * signal.shape[-2]
+        bytes_per_window = elements_per_window * signal.element_size()
+        num_windows_in_chunk = max(self.max_chunk_bytes // bytes_per_window, 1)
+
+        return torch.split(signal, num_windows_in_chunk, dim=0)
+
 
 if __name__ == "__main__":
     # test hf_audio_to_spectrogram and the collate fn
     preprocessor = SpectrogramPreprocessor()
-    print("Downloading dataset")
-    ds = load_dataset("samplr/songs", streaming=True, split="train")
-    print("Download complete, applying map")
-    ds = ds.map(lambda ex: {**ex, "transform": preprocessor(ex["audio"])})
-    print("map complete, making dataloader")
-
-    dataloader = DataLoader(
-        ds, batch_size=2, collate_fn=SpectrogramPreprocessor.collate_spectrograms
-    )
-    print("dataloader done, starting loop")
-    for batch in dataloader:
-
-        print("Concatenated batch shape:")
-        print(batch.size())
-
-    # # test the obfuscation stuff
-    # obf_ds = load_dataset("samplr/songs", streaming=True, split="train")
-    # obf_ds = obf_ds.map(
-    #     lambda ex: (
-    #         lambda signals: {**ex, "positive": signals[0], "anchor": signals[1]}
-    #     )(preprocessor(ex["audio"], obfuscate=True))
-    # )
+    # print("Downloading dataset")
+    # ds = load_dataset("samplr/songs", streaming=True, split="train")
+    # print("Download complete, applying map")
+    # ds = ds.map(lambda ex: {**ex, "transform": preprocessor(ex["audio"])})
+    # print("map complete, making dataloader")
 
     # dataloader = DataLoader(
-    #     obf_ds, batch_size=2, collate_fn=SpectrogramPreprocessor.collate_spectrograms
+    #     ds, batch_size=2, collate_fn=SpectrogramPreprocessor.collate_spectrograms
     # )
-    # for anchor, positive in dataloader:
+    # print("dataloader done, starting loop")
+    # for batch in dataloader:
+
     #     print("Concatenated batch shape:")
-    #     print(anchor.size())
-    #     print(positive.size())
-    #     break
+    #     print(batch.size())
+
+    # test the obfuscation stuff
+    def map_fn(ex):
+        positive, anchor = preprocessor(ex["audio"], obfuscate=True)
+        return {**ex, "positive": positive, "anchor": anchor}
+
+    with memray.Tracker("output.bin"):
+
+        obf_ds = load_dataset(
+            "samplr/songs",
+            streaming=True,
+            split="train",
+            cache_dir=Path(CACHE_DIR / "songs").__str__(),
+        ).cast_column("audio", Audio(decode=True))
+        obf_ds = obf_ds.map(map_fn)
+
+        dataloader = DataLoader(
+            obf_ds,
+            batch_size=2,
+            collate_fn=SpectrogramPreprocessor.collate_spectrograms,
+        )
+        i = 0
+        for anchor, positive in dataloader:
+            print("Concatenated batch shape:")
+            print(anchor.size())
+            print(positive.size())
+            break
+            i += 1
+            if i == 10:
+                break
+    print("done")
