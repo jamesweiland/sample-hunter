@@ -33,7 +33,7 @@ DEFAULT_MEL_SPECTROGRAM = MelSpectrogram(
     n_fft=DEFAULT_N_FFT,
     hop_length=DEFAULT_HOP_LENGTH,
     n_mels=DEFAULT_N_MELS,
-)
+).to(DEVICE)
 
 # CNN hyperparameters
 DEFAULT_STRIDE: int = 1
