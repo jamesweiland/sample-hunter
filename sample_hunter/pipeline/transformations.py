@@ -3,6 +3,7 @@ Custom generator functions to transform/pre-process data that is sitting
 in the huggingface dataset.
 """
 
+import argparse
 from functools import cached_property
 import math
 import multiprocessing
@@ -528,6 +529,10 @@ class SpectrogramPreprocessor:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("token", type=str)
+    args = parser.parse_args()
+
     # test hf_audio_to_spectrogram and the collate fn
     preprocessor = SpectrogramPreprocessor()
     # print("Downloading dataset")
@@ -557,6 +562,7 @@ if __name__ == "__main__":
             streaming=True,
             split="train",
             cache_dir=Path(CACHE_DIR / "songs").__str__(),
+            token=args.token,
         ).cast_column("audio", Audio(decode=True))
         obf_ds = obf_ds.map(map_fn)
 
