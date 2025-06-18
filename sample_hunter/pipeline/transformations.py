@@ -128,7 +128,6 @@ class Obfuscator(BaseModel):
     n_fft: int = DEFAULT_N_FFT
     hop_length: int = DEFAULT_HOP_LENGTH
     device: str = DEVICE
-    _pitch_shift_cache: Dict[int, torchaudio.transforms.PitchShift] = {}
     sample_rate: int = DEFAULT_SAMPLE_RATE
 
     @cached_property
@@ -225,8 +224,10 @@ class Obfuscator(BaseModel):
         pitch_choices = list(range(self.pitch_range[0], self.pitch_range[1] + 1, 6))
         n_steps = random.choice(pitch_choices)
 
-        shifter = self._get_pitch_shift(n_steps)
-        return shifter(signal), n_steps
+        return (
+            torchaudio.functional.pitch_shift(signal, self.sample_rate, n_steps),
+            n_steps,
+        )
 
     def apply_filter(self, signal: Tensor) -> Tuple[Tensor, Dict[str, int]]:
         """Apply either a high or low pass filter to `signal`."""
@@ -263,24 +264,6 @@ class Obfuscator(BaseModel):
         noisy_signal = signal + noise
         return noisy_signal, mods
 
-    def _get_pitch_shift(self, n_steps: int) -> torchaudio.transforms.PitchShift:
-        """
-        Check the pitch shift cache to see if there is a key for `n_steps`, if not,
-        initialize a new pitch shift and add it to the cache.
-        """
-        if self._pitch_shift_cache.get(n_steps) is not None:
-            return self._pitch_shift_cache[n_steps]
-        else:
-            ps = torchaudio.transforms.PitchShift(
-                sample_rate=self.sample_rate,
-                n_steps=n_steps,
-                n_fft=self.n_fft,
-                hop_length=self.hop_length,
-                window_fn=lambda _: self.window,
-            ).to(self.device)
-            self._pitch_shift_cache.update({n_steps: ps})
-            return ps
-
 
 class SpectrogramPreprocessor:
     """
@@ -316,7 +299,6 @@ class SpectrogramPreprocessor:
         self.device = device
         self.obfuscator = obfuscator
         self.num_workers = num_workers
-        self._resampler_cache = {}
 
     def __call__(
         self,
@@ -444,17 +426,13 @@ class SpectrogramPreprocessor:
         return signal
 
     def resample(self, signal: Tensor, sample_rate: int) -> Tensor:
-        torch.set_num_threads(1)
         if sample_rate != self.target_sample_rate:
             print("We actually have to resample")
-            if sample_rate in self._resampler_cache.keys():
-                signal = self._resampler_cache[sample_rate](sample_rate)
-            else:
-                resampler = torchaudio.transforms.Resample(
-                    sample_rate, self.target_sample_rate
-                ).to(self.device)
-                signal = resampler(signal)
-        torch.set_num_threads(torch.multiprocessing.cpu_count())
+            torch.set_num_threads(1)
+            signal = torchaudio.functional.resample(
+                signal, sample_rate, self.target_sample_rate
+            )
+            torch.set_num_threads(torch.multiprocessing.cpu_count())
         return signal
 
     @staticmethod
