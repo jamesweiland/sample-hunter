@@ -2,7 +2,9 @@ from datasets import IterableDataset, Dataset, load_dataset
 from typing import Callable, Generator, Dict, Iterator, Any
 from torch import Tensor
 
-from sample_hunter.pipeline.transformations import hf_audio_to_spectrogram
+from sample_hunter.pipeline.transformations.transformations import (
+    hf_audio_to_spectrogram,
+)
 
 
 class SongDataset:

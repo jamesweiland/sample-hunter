@@ -5,29 +5,19 @@ in the huggingface dataset.
 
 import argparse
 from functools import cached_property
-import math
-import multiprocessing
 import random
-import tempfile
-import time
-import warnings
 import memray
-import numpy as np
 import torch
 import torchaudio
 from torchaudio.transforms import MelSpectrogram
 from torch import Tensor
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 from pathlib import Path
 from datasets import load_dataset, Audio
 from torch.utils.data import DataLoader
 from pydantic import BaseModel, field_validator
-from sox import Transformer, Combiner
 
 from sample_hunter._util import (
-    DEFAULT_HOP_LENGTH,
-    DEFAULT_N_FFT,
-    DEFAULT_N_MELS,
     DEVICE,
     DEFAULT_MEL_SPECTROGRAM,
     DEFAULT_SAMPLE_RATE,
@@ -35,57 +25,52 @@ from sample_hunter._util import (
     DEFAULT_STEP_NUM_SAMPLES,
     PROCS,
     CACHE_DIR,
+    HF_TOKEN,
+)
+from sample_hunter.pipeline.transformations.functional import (
+    collate_spectrograms,
+    resize,
+    slice_tensor,
 )
 
 
-class TempfileContext:
-    """
-    A wrapper around tempfile.NamedTemporaryFile
-    to create temporary files without having to worry about cleanup.
-    """
+class BatchedPitchPerturbation(torch.nn.Module):
+    def __init__(self, sub_batch_size: int, n_steps_list: List[int], sample_rate: int):
+        super().__init__()
+        self.sub_batch_size = sub_batch_size
+        self.shifters = [
+            torchaudio.transforms.PitchShift(sample_rate, n_steps)
+            for n_steps in n_steps_list
+        ]
 
-    def __init__(self, files: List[str], suffix: List[str] | str = ".mp3"):
-        """
-        Store the necessary settings for the manager.
+    def forward(self, batch: Tensor):
+        for idx, sub_batch in slice_tensor(batch, self.sub_batch_size):
+            i = int(torch.randint(len(self.shifters), ()))
+            for j, shifter in enumerate(self.shifters):
+                if i == j:
+                    batch[idx] = shifter(sub_batch)
+        return batch
 
-        Args:
-            files: a string or list of strings representing the filenames,
-            that can be accessed as attributes of the TempfileContext object.
-            suffixes: a string or list of strings representing the suffixes of each file.
-            If only a string is given for suffixes but a list is given for files, the same suffix
-            will be used for each file.
-        """
-        self._files = files
-        if isinstance(suffix, str):
-            self._suffix = [suffix] * len(self._files)
-        else:
-            self._suffix = suffix
 
-    def __enter__(self):
-        self._paths = []
-        for filename, suffix in zip(self._files, self._suffix):
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-                setattr(self, filename, Path(f.name))
-                self._paths.append(Path(f.name))
-                # now, exit this context so other processes can write to the file
-        return self
+class BatchedSpeedPerturbation(torchaudio.transforms.SpeedPerturbation):
+    def __init__(self, sub_batch_size: int, *args, **kwargs):
+        self.sub_batch_size = sub_batch_size
+        super().__init__(*args, **kwargs)
 
-    def __exit__(self, *exc):
-        for f in self._paths:
-            f.unlink()
+    def forward(
+        self, waveform: torch.Tensor, lengths: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        perm = torch.randperm(waveform.shape[0])
+        original_idx = torch.argsort(perm)
+        waveform = waveform[perm]
+        for idx, sub_batch in slice_tensor(waveform, self.sub_batch_size):
+            waveform[idx] = resize(
+                super().forward(sub_batch, lengths)[0], waveform.shape[-1]
+            )
 
-    def append(self, file: str, suffix: str | None = None):
-        """
-        Add a new temp file. if suffix is not specified then it will be the same suffix as the last file element in _suffix
-        """
-        if suffix is not None:
-            self._suffix.append(suffix)
-        else:
-            self._suffix.append(self._suffix[-1])
-        with tempfile.NamedTemporaryFile(suffix=self._suffix[-1], delete=False) as f:
-            setattr(self, file, Path(f.name))
-            self._paths.append(Path(f.name))
-        self._files.append(file)
+        # restore back to the original order
+        waveform = waveform[original_idx]
+        return waveform, None
 
 
 class Obfuscator(BaseModel):
@@ -116,39 +101,35 @@ class Obfuscator(BaseModel):
         pink noise will be applied).
     """
 
-    tempo_range: Tuple[float, float] = (0.6, 1.5)
-    pitch_range: Tuple[int, int] = (-24, 24)
-    reverb_range: Tuple[int, int] = (40, 100)
+    speed_factors: List[float] = [0.5, 0.75, 1, 1.5, 2]
+    n_steps_list: List[int] = [-12, -6, 0, 12, 18, 24]
+    sub_batch_size: int = 25
     lowpass_range: Tuple[int, int] = (1000, 3000)
     highpass_range: Tuple[int, int] = (500, 1500)
     whitenoise_range: Tuple[float, float] = (0.05, 0.25)
     pinknoise_range: Tuple[float, float] = (0.05, 0.25)
     lowpass_frac: float = 0.5
     whitenoise_frac: float = 0.5
-    n_fft: int = DEFAULT_N_FFT
-    hop_length: int = DEFAULT_HOP_LENGTH
     device: str = DEVICE
     sample_rate: int = DEFAULT_SAMPLE_RATE
 
     @cached_property
-    def window(self):
-        return torch.hann_window(window_length=self.n_fft, device=self.device)
+    def speed_perturbation(self) -> BatchedSpeedPerturbation:
+        return BatchedSpeedPerturbation(
+            sub_batch_size=self.sub_batch_size,
+            orig_freq=self.sample_rate,
+            factors=self.speed_factors,
+        ).to(self.device)
 
-    @field_validator("pitch_range")
-    def check_pitch_range(cls, v, field):
-        """Check that pitch range is clean so that
-        it doesn't take up a ton of memory"""
-        if v[0] % 6 != 0 or v[1] % 6 != 0:
-            warnings.warn(
-                "it is best to make pitch_range between half or full tones"
-                ", otherwise it will take up a lot of memory"
-            )
-        return v
+    @cached_property
+    def pitch_perturbation(self) -> BatchedPitchPerturbation:
+        return BatchedPitchPerturbation(
+            sub_batch_size=self.sub_batch_size,
+            sample_rate=self.sample_rate,
+            n_steps_list=self.n_steps_list,
+        ).to(self.device)
 
     @field_validator(
-        "tempo_range",
-        "pitch_range",
-        "reverb_range",
         "lowpass_range",
         "highpass_range",
         "whitenoise_range",
@@ -169,67 +150,20 @@ class Obfuscator(BaseModel):
             raise ValueError(f"{field.name} must be between 0 and 1")
         return v
 
-    def __call__(self, batch: Tensor, return_complex_spec: bool = False) -> Tensor:
+    def __call__(self, batch: Tensor) -> Tensor:
         """
         Accepts a torch.tensor
         and returns the obfuscated tensor.
         """
         with torch.no_grad():
             batch = batch.contiguous() if not batch.is_contiguous() else batch
-            mods = {}
-            batch, pitch = self.pitch_distort(batch)
-            mods.update({"pitch": round(pitch, 2)})
-            batch, filter = self.apply_filter(batch)
-            mods.update(filter)
-            batch, noise_mods = self.add_noise(batch)
-            mods.update(noise_mods)
-            batch, tempo = self.time_distort(batch)  # this makes a complex spec
-            mods.update({"tempo": round(tempo, 2)})
-            if return_complex_spec:
-                return batch
-            # convert back to audio before returning
-            return torch.istft(
-                batch, n_fft=self.n_fft, hop_length=self.hop_length, window=self.window
-            ).unsqueeze(1)
+            batch = self.speed_perturbation(batch)[0]
+            batch = self.pitch_perturbation(batch)
+            batch = self.apply_filter(batch)
+            batch = self.add_noise(batch)
+            return batch
 
-    def time_distort(self, signal: Tensor) -> Tuple[Tensor, float]:
-        """Apply a tempo distortion to `signal`."""
-        # rate = random.uniform(*self.tempo_range)
-        rate = 1.5
-
-        spec = torch.stft(
-            input=signal.squeeze(1),
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            window=self.window,
-            return_complex=True,
-        )
-        print(
-            f"Complex spec size before passing to phase_vocoder: {spec.nbytes * 1e-9} GB"
-        )
-        freq_bins = self.n_fft // 2 + 1
-        phase_advance = torch.linspace(
-            0, math.pi * self.hop_length, freq_bins, device=self.device
-        ).unsqueeze(-1)
-
-        return (
-            torchaudio.functional.phase_vocoder(
-                complex_specgrams=spec, rate=rate, phase_advance=phase_advance
-            ),
-            rate,
-        )
-
-    def pitch_distort(self, signal: Tensor) -> Tuple[Tensor, int]:
-        """Apply a pitch distortion to `signal`."""
-        pitch_choices = list(range(self.pitch_range[0], self.pitch_range[1] + 1, 6))
-        n_steps = random.choice(pitch_choices)
-
-        return (
-            torchaudio.functional.pitch_shift(signal, self.sample_rate, n_steps),
-            n_steps,
-        )
-
-    def apply_filter(self, signal: Tensor) -> Tuple[Tensor, Dict[str, int]]:
+    def apply_filter(self, signal: Tensor) -> Tensor:
         """Apply either a high or low pass filter to `signal`."""
         if random.random() < self.lowpass_frac:
             # apply low pass
@@ -237,22 +171,19 @@ class Obfuscator(BaseModel):
             signal = torchaudio.functional.lowpass_biquad(
                 signal, self.sample_rate, freq
             )
-            mods = {"lowpass": freq}
         else:
             # apply high pass
             freq = random.randint(*self.highpass_range)
             signal = torchaudio.functional.highpass_biquad(
                 signal, self.sample_rate, freq
             )
-            mods = {"highpass": freq}
-        return signal, mods
+        return signal
 
-    def add_noise(self, signal: Tensor) -> Tuple[Tensor, Dict[str, float]]:
+    def add_noise(self, signal: Tensor) -> Tensor:
         """Add either white or pink noise to `signal`."""
         if random.random() < self.whitenoise_frac:
             noise_level = random.uniform(*self.whitenoise_range)
             noise = torch.randn_like(signal) * noise_level
-            mods = {"whitenoise": round(noise_level, 2)}
         else:
             noise_level = random.uniform(*self.pinknoise_range)
             whitenoise = torch.randn_like(signal)
@@ -260,9 +191,8 @@ class Obfuscator(BaseModel):
             pinknoise = torch.cumsum(whitenoise, dim=-1)
             pinknoise = pinknoise / pinknoise.abs().max(dim=-1, keepdim=True).values
             noise = pinknoise * noise_level
-            mods = {"pinknoise": round(noise_level, 2)}
-        noisy_signal = signal + noise
-        return noisy_signal, mods
+        signal = signal + noise
+        return signal
 
 
 class SpectrogramPreprocessor:
@@ -314,7 +244,7 @@ class SpectrogramPreprocessor:
             if isinstance(data, Dict):
                 # it is a huggingface Audio object
                 signal = torch.tensor(
-                    data["array"], dtype=torch.float16, device=self.device
+                    data["array"], dtype=torch.float32, device=self.device
                 ).to(self.device)
                 if signal.ndim == 1:
                     signal = signal.unsqueeze(0)
@@ -381,22 +311,12 @@ class SpectrogramPreprocessor:
         print(f"Obfuscating: {signal.nbytes * 1e-9} GB")
         print(f"Obfuscating: {signal.shape}")
 
-        ob_sig = SpectrogramPreprocessor.resize(
-            self.obfuscator(signal), signal.shape[-1]
+        ob_sig = resize(
+            self.obfuscator(signal),
+            signal.shape[-1],
         )
-
-        # ob_sig = torch.cat(
-        #     [
-        #         SpectrogramPreprocessor.resize(
-        #             self.obfuscator(chunk, self.target_sample_rate), signal.shape[-1]
-        #         )
-        #         for chunk in self._split_into_chunks(signal)
-        #     ],
-        #     dim=0,
-        # )
-
         torchaudio.save(
-            uri="unob.mp3",
+            uri="unob1.mp3",
             src=signal[0].to(torch.float32),
             format="mp3",
             backend="ffmpeg",
@@ -404,8 +324,40 @@ class SpectrogramPreprocessor:
         )
 
         torchaudio.save(
-            uri="ob.mp3",
+            uri="ob1.mp3",
             src=ob_sig[0].to(torch.float32),
+            format="mp3",
+            backend="ffmpeg",
+            sample_rate=self.target_sample_rate,
+        )
+
+        torchaudio.save(
+            uri="unob2.mp3",
+            src=signal[1].to(torch.float32),
+            format="mp3",
+            backend="ffmpeg",
+            sample_rate=self.target_sample_rate,
+        )
+
+        torchaudio.save(
+            uri="ob2.mp3",
+            src=ob_sig[1].to(torch.float32),
+            format="mp3",
+            backend="ffmpeg",
+            sample_rate=self.target_sample_rate,
+        )
+
+        torchaudio.save(
+            uri="unob3.mp3",
+            src=signal[2].to(torch.float32),
+            format="mp3",
+            backend="ffmpeg",
+            sample_rate=self.target_sample_rate,
+        )
+
+        torchaudio.save(
+            uri="ob3.mp3",
+            src=ob_sig[2].to(torch.float32),
             format="mp3",
             backend="ffmpeg",
             sample_rate=self.target_sample_rate,
@@ -435,19 +387,6 @@ class SpectrogramPreprocessor:
             torch.set_num_threads(torch.multiprocessing.cpu_count())
         return signal
 
-    @staticmethod
-    def resize(signal: Tensor, desired_length: int) -> Tensor:
-        """Set the length of the signal to the desired length"""
-        print(f"Before resizing: {signal.nbytes * 1e-9} GB")
-        print(f"Before resizing: {signal.shape}")
-        if signal.shape[-1] < desired_length:
-            num_missing_samples = desired_length - signal.shape[-1]
-            print(f"Padding {num_missing_samples} samples")
-            return torch.nn.functional.pad(signal, (0, num_missing_samples))
-        if signal.shape[-1] > desired_length:
-            return signal[..., :desired_length]
-        return signal
-
     def create_windows(self, signal: Tensor) -> Tensor:
         # handle signals shorter than window size
         if signal.size(1) < self.window_num_samples:
@@ -471,45 +410,18 @@ class SpectrogramPreprocessor:
             last_segment = signal[
                 :, (num_windows - 1) * self.step_num_samples + self.window_num_samples :
             ]
-            last_segment = self.resize(last_segment, self.window_num_samples).unsqueeze(
-                1
-            )
+            last_segment = resize(last_segment, self.window_num_samples).unsqueeze(1)
             windows = torch.cat([windows, last_segment], dim=1)
 
         return windows.transpose(0, 1).to(self.device)
 
-    @staticmethod
-    def collate_spectrograms(
-        batch: List[Dict[str, Tensor]],
-    ) -> Tensor | Tuple[Tensor, Tensor]:
-        """
-        Collate a batch of mappings of transformed tensors before passing to the dataloader.
-
-        This function expects tensors with shape (batch_size, num_windows, num_channels, n_mels, time_frames)
-        and returns a tensor with shape (new_batch_size, num_channels, n_mels, time_frames)
-        """
-        if batch[0].get("transform") is not None:
-            return torch.cat([example["transform"] for example in batch], dim=0)
-        return torch.cat([example["anchor"] for example in batch], dim=0), torch.cat(
-            [example["positive"] for example in batch], dim=0
-        )
-
-    def _split_into_chunks(self, signal: Tensor) -> Tuple[Tensor, ...]:
-        """
-        Split a tensor into chunks, with a maximum size of self.max_chunk_bytes
-
-        """
-        elements_per_window = signal.shape[-1] * signal.shape[-2]
-        bytes_per_window = elements_per_window * signal.element_size()
-        num_windows_in_chunk = max(self.max_chunk_bytes // bytes_per_window, 1)
-
-        return torch.split(signal, num_windows_in_chunk, dim=0)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("token", type=str)
+    parser.add_argument("--token", type=str, required=False)
     args = parser.parse_args()
+    if args.token is None:
+        args.token = HF_TOKEN
 
     # test hf_audio_to_spectrogram and the collate fn
     preprocessor = SpectrogramPreprocessor()
@@ -546,8 +458,8 @@ if __name__ == "__main__":
 
         dataloader = DataLoader(
             obf_ds,
-            batch_size=10,
-            collate_fn=SpectrogramPreprocessor.collate_spectrograms,
+            batch_size=2,
+            collate_fn=collate_spectrograms,
         )
         i = 0
         for anchor, positive in dataloader:
