@@ -4,20 +4,25 @@ in the huggingface dataset.
 """
 
 import argparse
+from fractions import Fraction
 from functools import cached_property
+import math
 import random
+import sys
 import memray
 import torch
 import torchaudio
 from torchaudio.transforms import MelSpectrogram
 from torch import Tensor
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple, Union
 from pathlib import Path
 from datasets import load_dataset, Audio
 from torch.utils.data import DataLoader
 from pydantic import BaseModel, field_validator
 
 from sample_hunter._util import (
+    DEFAULT_HOP_LENGTH,
+    DEFAULT_N_FFT,
     DEVICE,
     DEFAULT_MEL_SPECTROGRAM,
     DEFAULT_SAMPLE_RATE,
@@ -26,6 +31,7 @@ from sample_hunter._util import (
     PROCS,
     CACHE_DIR,
     HF_TOKEN,
+    plot_spectrogram,
 )
 from sample_hunter.pipeline.transformations.functional import (
     collate_spectrograms,
@@ -35,42 +41,85 @@ from sample_hunter.pipeline.transformations.functional import (
 
 
 class BatchedPitchPerturbation(torch.nn.Module):
-    def __init__(self, sub_batch_size: int, n_steps_list: List[int], sample_rate: int):
+    def __init__(self, sub_batch_size: int, rates_list: List[float], sample_rate: int):
         super().__init__()
         self.sub_batch_size = sub_batch_size
+        n_steps_list = [-math.log2(rate) for rate in rates_list]
+        # ensure that the n_steps are rational by converting them to a Fraction
+        n_steps_list = [
+            Fraction(n_steps).limit_denominator(1000) for n_steps in n_steps_list
+        ]
+
         self.shifters = [
-            torchaudio.transforms.PitchShift(sample_rate, n_steps)
+            torchaudio.transforms.PitchShift(
+                sample_rate,
+                n_steps=n_steps.numerator,
+                bins_per_octave=n_steps.denominator,
+            )
             for n_steps in n_steps_list
         ]
 
     def forward(self, batch: Tensor):
+        ob = torch.empty_like(batch, device=batch.device, dtype=batch.dtype)
         for idx, sub_batch in slice_tensor(batch, self.sub_batch_size):
-            i = int(torch.randint(len(self.shifters), ()))
+            i = random.randint(0, len(self.shifters) - 1)
             for j, shifter in enumerate(self.shifters):
                 if i == j:
-                    batch[idx] = shifter(sub_batch)
-        return batch
+                    print(f"Picking shifter {i} with n_steps {shifter.n_steps}")
+                    ob[idx] = shifter(sub_batch)
+                    if getattr(shifter, "kernel", None) is not None:
+                        print(
+                            f"This shifter's kernel has size {sys.getsizeof(shifter.kernel) * 1e-9} GB"
+                        )
+        return ob
 
 
-class BatchedSpeedPerturbation(torchaudio.transforms.SpeedPerturbation):
-    def __init__(self, sub_batch_size: int, *args, **kwargs):
+class BatchedTimeStretchPerturbation(torch.nn.Module):
+    def __init__(
+        self,
+        factors: List[float],
+        sub_batch_size: int,
+        n_fft: int = DEFAULT_N_FFT,
+        hop_length: int = DEFAULT_HOP_LENGTH,
+        device: str = DEVICE,
+    ):
+        super().__init__()
         self.sub_batch_size = sub_batch_size
-        super().__init__(*args, **kwargs)
-
-    def forward(
-        self, waveform: torch.Tensor, lengths: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        perm = torch.randperm(waveform.shape[0])
-        original_idx = torch.argsort(perm)
-        waveform = waveform[perm]
-        for idx, sub_batch in slice_tensor(waveform, self.sub_batch_size):
-            waveform[idx] = resize(
-                super().forward(sub_batch, lengths)[0], waveform.shape[-1]
+        self.hop_length = hop_length
+        self.n_fft = n_fft
+        self.window = torch.hann_window(window_length=self.n_fft, device=device)
+        self.stretchers = [
+            torchaudio.transforms.TimeStretch(
+                hop_length=self.hop_length,
+                fixed_rate=factor,
+                n_freq=self.hop_length + 1,
             )
+            for factor in factors
+        ]
 
-        # restore back to the original order
-        waveform = waveform[original_idx]
-        return waveform, None
+    def forward(self, batch: Tensor) -> Tensor:
+        ob = torch.empty_like(batch, device=batch.device, dtype=batch.dtype)
+        for idx, sub_batch in slice_tensor(batch, self.sub_batch_size):
+            print("Do we get here?")
+            i = random.randint(0, len(self.stretchers) - 1)
+            print(i)
+            for j, stretcher in enumerate(self.stretchers):
+                if i == j:
+                    print("Stretching")
+                    spec = torch.stft(
+                        sub_batch.squeeze(1),
+                        n_fft=self.n_fft,
+                        hop_length=self.hop_length,
+                        return_complex=True,
+                        window=self.window,
+                    )
+                    spec = stretcher(spec)
+                    ob[idx] = resize(
+                        torch.istft(spec, n_fft=self.n_fft, hop_length=self.hop_length),
+                        batch.shape[-1],
+                    ).unsqueeze(1)
+
+        return ob
 
 
 class Obfuscator(BaseModel):
@@ -101,24 +150,25 @@ class Obfuscator(BaseModel):
         pink noise will be applied).
     """
 
-    speed_factors: List[float] = [0.5, 0.75, 1, 1.5, 2]
-    n_steps_list: List[int] = [-12, -6, 0, 12, 18, 24]
+    time_stretch_factors: List[float] = [0.75, 1, 1.25, 1.5]
+    pitch_factors: List[float] = [0.5, 0.75, 1, 1.2, 1.5]
     sub_batch_size: int = 25
-    lowpass_range: Tuple[int, int] = (1000, 3000)
+    lowpass_range: Tuple[int, int] = (2000, 3000)
     highpass_range: Tuple[int, int] = (500, 1500)
-    whitenoise_range: Tuple[float, float] = (0.05, 0.25)
-    pinknoise_range: Tuple[float, float] = (0.05, 0.25)
+    whitenoise_range: Tuple[float, float] = (0.00, 0.1)
     lowpass_frac: float = 0.5
-    whitenoise_frac: float = 0.5
     device: str = DEVICE
     sample_rate: int = DEFAULT_SAMPLE_RATE
+    n_fft: int = DEFAULT_N_FFT
+    hop_length: int = DEFAULT_HOP_LENGTH
 
     @cached_property
-    def speed_perturbation(self) -> BatchedSpeedPerturbation:
-        return BatchedSpeedPerturbation(
+    def time_stretch_perturbation(self) -> BatchedTimeStretchPerturbation:
+        return BatchedTimeStretchPerturbation(
             sub_batch_size=self.sub_batch_size,
-            orig_freq=self.sample_rate,
-            factors=self.speed_factors,
+            factors=self.time_stretch_factors,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
         ).to(self.device)
 
     @cached_property
@@ -126,14 +176,13 @@ class Obfuscator(BaseModel):
         return BatchedPitchPerturbation(
             sub_batch_size=self.sub_batch_size,
             sample_rate=self.sample_rate,
-            n_steps_list=self.n_steps_list,
+            rates_list=self.pitch_factors,
         ).to(self.device)
 
     @field_validator(
         "lowpass_range",
         "highpass_range",
         "whitenoise_range",
-        "pinknoise_range",
     )
     def check_range(cls, v, field):
         if len(v) != 2:
@@ -144,7 +193,7 @@ class Obfuscator(BaseModel):
             )
         return v
 
-    @field_validator("lowpass_frac", "whitenoise_frac")
+    @field_validator("lowpass_frac")
     def check_fraction(cls, v, field):
         if not (0 <= v <= 1):
             raise ValueError(f"{field.name} must be between 0 and 1")
@@ -157,7 +206,7 @@ class Obfuscator(BaseModel):
         """
         with torch.no_grad():
             batch = batch.contiguous() if not batch.is_contiguous() else batch
-            batch = self.speed_perturbation(batch)[0]
+            batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)
             batch = self.apply_filter(batch)
             batch = self.add_noise(batch)
@@ -165,34 +214,101 @@ class Obfuscator(BaseModel):
 
     def apply_filter(self, signal: Tensor) -> Tensor:
         """Apply either a high or low pass filter to `signal`."""
-        if random.random() < self.lowpass_frac:
-            # apply low pass
-            freq = random.randint(*self.lowpass_range)
-            signal = torchaudio.functional.lowpass_biquad(
-                signal, self.sample_rate, freq
-            )
-        else:
-            # apply high pass
-            freq = random.randint(*self.highpass_range)
-            signal = torchaudio.functional.highpass_biquad(
-                signal, self.sample_rate, freq
-            )
-        return signal
+
+        # generate decisions per snippet in the batch
+        lowpass_mask = (
+            torch.rand(signal.shape[0], device=signal.device) < self.lowpass_frac
+        )
+        frequencies = torch.zeros(signal.shape[0], dtype=torch.int)
+
+        low_idx = lowpass_mask.nonzero().squeeze(1)
+        low_freqs = torch.randint(
+            low=self.lowpass_range[0],
+            high=self.lowpass_range[1] + 1,
+            size=(low_idx.shape[0],),
+            device=signal.device,
+            dtype=torch.int,
+        )
+        frequencies[lowpass_mask] = low_freqs
+        high_idx = (~lowpass_mask).nonzero().squeeze(1)
+        high_freqs = torch.randint(
+            low=self.highpass_range[0],
+            high=self.highpass_range[1] + 1,
+            size=(high_idx.shape[0],),
+            device=signal.device,
+            dtype=torch.int,
+        )
+        frequencies[~lowpass_mask] = high_freqs
+        signal_low = self._lowpass_biquad(
+            signal[lowpass_mask], self.sample_rate, frequencies[lowpass_mask]
+        )
+        signal_high = self._highpass_biquad(
+            signal[~lowpass_mask], self.sample_rate, frequencies[~lowpass_mask]
+        )
+        ob = torch.empty_like(signal, dtype=signal.dtype, device=signal.device)
+        ob[lowpass_mask] = signal_low
+        ob[~lowpass_mask] = signal_high
+        return ob
+
+    def _lowpass_biquad(
+        self, signal: Tensor, sample_rate: int, cutoff_freq: Tensor, Q: float = 0.707
+    ) -> Tensor:
+        Q = torch.as_tensor(Q, dtype=signal.dtype, device=signal.device)  # type: ignore
+        w0 = 2 * math.pi * cutoff_freq / sample_rate
+        alpha = torch.sin(w0) / 2 / Q
+
+        b0 = (1 - torch.cos(w0)) / 2
+        b1 = 1 - torch.cos(w0)
+        b2 = b0
+        a0 = 1 + alpha
+        a1 = -2 * torch.cos(w0)
+        a2 = 1 - alpha
+        return self._biquad(signal, b0, b1, b2, a0, a1, a2)
+
+    def _highpass_biquad(
+        self, signal: Tensor, sample_rate: int, cutoff_freq: Tensor, Q: float = 0.707
+    ) -> Tensor:
+        Q = torch.as_tensor(Q, dtype=signal.dtype, device=signal.device)  # type: ignore
+        w0 = 2 * math.pi * cutoff_freq / sample_rate
+        alpha = torch.sin(w0) / 2.0 / Q
+
+        b0 = (1 + torch.cos(w0)) / 2
+        b1 = -1 - torch.cos(w0)
+        b2 = b0
+        a0 = 1 + alpha
+        a1 = -2 * torch.cos(w0)
+        a2 = 1 - alpha
+        return self._biquad(signal, b0, b1, b2, a0, a1, a2)
+
+    def _biquad(
+        self,
+        signal: Tensor,
+        b0: Tensor,
+        b1: Tensor,
+        b2: Tensor,
+        a0: Tensor,
+        a1: Tensor,
+        a2: Tensor,
+    ) -> Tensor:
+        a_coeffs = torch.stack([a0, a1, a2], dim=1)
+        b_coeffs = torch.stack([b0, b1, b2], dim=1)
+
+        batch = signal.reshape((1, signal.shape[0], signal.shape[-1]))
+        output = torchaudio.functional.filtering.lfilter(
+            batch, a_coeffs, b_coeffs, clamp=True, batching=True
+        )
+        return output.reshape(signal.shape)
 
     def add_noise(self, signal: Tensor) -> Tensor:
         """Add either white or pink noise to `signal`."""
-        if random.random() < self.whitenoise_frac:
-            noise_level = random.uniform(*self.whitenoise_range)
-            noise = torch.randn_like(signal) * noise_level
-        else:
-            noise_level = random.uniform(*self.pinknoise_range)
-            whitenoise = torch.randn_like(signal)
-            # filter whitenoise to get pinknoise
-            pinknoise = torch.cumsum(whitenoise, dim=-1)
-            pinknoise = pinknoise / pinknoise.abs().max(dim=-1, keepdim=True).values
-            noise = pinknoise * noise_level
-        signal = signal + noise
-        return signal
+        print(f"Signal: {signal.nbytes * 1e-9} GB")
+        noise = torch.randn_like(signal, device=signal.device, dtype=signal.dtype)
+        noise_levels = self.whitenoise_range[0] + (
+            self.whitenoise_range[1] - self.whitenoise_range[0]
+        ) * torch.rand(signal.shape[0], device=signal.device, dtype=torch.float16)
+        return torchaudio.functional.add_noise(
+            waveform=signal, noise=noise, snr=noise_levels.unsqueeze(1)
+        )
 
 
 class SpectrogramPreprocessor:
@@ -306,58 +422,18 @@ class SpectrogramPreprocessor:
             the obfuscation time-distorted the tensor, it will be truncated
             or padded to match the exact shape of the input
         """
-        # window = signal[0]
-        # first, split signal into chunks
-        print(f"Obfuscating: {signal.nbytes * 1e-9} GB")
-        print(f"Obfuscating: {signal.shape}")
+        ob_sig = self.obfuscator(signal)
 
-        ob_sig = resize(
-            self.obfuscator(signal),
-            signal.shape[-1],
-        )
         torchaudio.save(
-            uri="unob1.mp3",
-            src=signal[0].to(torch.float32),
+            uri="unob.mp3",
+            src=signal[0],
             format="mp3",
             backend="ffmpeg",
             sample_rate=self.target_sample_rate,
         )
-
         torchaudio.save(
-            uri="ob1.mp3",
-            src=ob_sig[0].to(torch.float32),
-            format="mp3",
-            backend="ffmpeg",
-            sample_rate=self.target_sample_rate,
-        )
-
-        torchaudio.save(
-            uri="unob2.mp3",
-            src=signal[1].to(torch.float32),
-            format="mp3",
-            backend="ffmpeg",
-            sample_rate=self.target_sample_rate,
-        )
-
-        torchaudio.save(
-            uri="ob2.mp3",
-            src=ob_sig[1].to(torch.float32),
-            format="mp3",
-            backend="ffmpeg",
-            sample_rate=self.target_sample_rate,
-        )
-
-        torchaudio.save(
-            uri="unob3.mp3",
-            src=signal[2].to(torch.float32),
-            format="mp3",
-            backend="ffmpeg",
-            sample_rate=self.target_sample_rate,
-        )
-
-        torchaudio.save(
-            uri="ob3.mp3",
-            src=ob_sig[2].to(torch.float32),
+            uri="ob.mp3",
+            src=ob_sig[0],
             format="mp3",
             backend="ffmpeg",
             sample_rate=self.target_sample_rate,
@@ -417,6 +493,7 @@ class SpectrogramPreprocessor:
 
 
 if __name__ == "__main__":
+    # test the obfuscations
     parser = argparse.ArgumentParser()
     parser.add_argument("--token", type=str, required=False)
     args = parser.parse_args()
@@ -466,6 +543,11 @@ if __name__ == "__main__":
             print("Concatenated batch shape:")
             print(anchor.size())
             print(positive.size())
+
+            for i in range(2):
+                plot_spectrogram(anchor[i], f"Anchor {i}")
+                plot_spectrogram(positive[i], f"Positive {i}")
+
             break
             i += 1
             if i == 10:
