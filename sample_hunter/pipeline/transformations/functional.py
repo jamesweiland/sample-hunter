@@ -5,19 +5,22 @@ import torch
 
 
 def collate_spectrograms(
-    batch: List[Dict[str, Tensor]],
-) -> Tensor | Tuple[Tensor, Tensor]:
+    batch: List[Dict[str, Tensor]], col: str | List[str]
+) -> Tensor | Tuple[Tensor, ...]:
     """
     Collate a batch of mappings of transformed tensors before passing to the dataloader.
 
     This function expects tensors with shape (batch_size, num_windows, num_channels, n_mels, time_frames)
     and returns a tensor with shape (new_batch_size, num_channels, n_mels, time_frames)
     """
-    if batch[0].get("transform") is not None:
-        return torch.cat([example["transform"] for example in batch], dim=0)
-    return torch.cat([example["anchor"] for example in batch], dim=0), torch.cat(
-        [example["positive"] for example in batch], dim=0
-    )
+
+    if isinstance(col, str):
+        return torch.cat([example[col] for example in batch], dim=0)
+    else:
+        to_return = [
+            torch.cat([example[name] for example in batch], dim=0) for name in col
+        ]
+        return tuple(to_return)
 
 
 def resize(signal: Tensor, desired_length: int) -> Tensor:

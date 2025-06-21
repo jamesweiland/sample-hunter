@@ -139,15 +139,14 @@ class Obfuscator(BaseModel):
     Args:
         `tempo_range`: The range with which to time-distort the signal.
         `pitch_range`: The range with which to pitch-distort the signal.
-        `reverb_range`: The range with which to add reverb to the signal.
         `lowpass_range`: The range with which to add a low-pass filter.
         `highpass_range`: The range with which to add a high-pass filter.
         `whitenoise_range`: The volume range of white noise to add.
-        `pinknoise_range`: The volume range of pink noise to add.
         `lowpass_frac`: The proportion of signals to apply a lowpass filter to (otherwise,
         a highpass filter will be applied).
-        `whitenoise_frac`: The proportion of signals to apply white noise to (otherwise,
-        pink noise will be applied).
+        `sample_rate`: the sample rate of the signal to distort
+        `n_fft`: n_fft to use for the window for the FFT
+        `hop_length`: the hop length for the FFT
     """
 
     time_stretch_factors: List[float] = [0.75, 1, 1.25, 1.5]
@@ -344,7 +343,6 @@ class SpectrogramPreprocessor:
         self.step_num_samples = step_num_samples
         self.device = device
         self.obfuscator = obfuscator
-        self.num_workers = num_workers
 
     def __call__(
         self,
@@ -423,21 +421,6 @@ class SpectrogramPreprocessor:
             or padded to match the exact shape of the input
         """
         ob_sig = self.obfuscator(signal)
-
-        torchaudio.save(
-            uri="unob.mp3",
-            src=signal[0],
-            format="mp3",
-            backend="ffmpeg",
-            sample_rate=self.target_sample_rate,
-        )
-        torchaudio.save(
-            uri="ob.mp3",
-            src=ob_sig[0],
-            format="mp3",
-            backend="ffmpeg",
-            sample_rate=self.target_sample_rate,
-        )
 
         return ob_sig
 
