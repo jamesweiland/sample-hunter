@@ -17,8 +17,8 @@ from sample_hunter._util import (
     AUDIO_DIR,
     ANNOTATIONS_PATH,
     DEFAULT_MEL_SPECTROGRAM,
-    SAMPLE_RATE,
-    WINDOW_SIZE,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_WINDOW_NUM_SAMPLES,
 )
 
 
@@ -104,8 +104,8 @@ if __name__ == "__main__":
         audio_dir=AUDIO_DIR,
         annotations_file=ANNOTATIONS_PATH,
         mel_spectrogram=DEFAULT_MEL_SPECTROGRAM,
-        target_sample_rate=SAMPLE_RATE,
-        num_samples=WINDOW_SIZE,
+        target_sample_rate=DEFAULT_SAMPLE_RATE,
+        num_samples=DEFAULT_WINDOW_NUM_SAMPLES,
         device=DEVICE,
     )
 
