@@ -1,3 +1,4 @@
+import math
 import random
 import torch
 import torch.nn as nn
@@ -7,13 +8,22 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import Callable, Tuple, Union
 import argparse
 from pathlib import Path
-from datasets import load_dataset, IterableDataset
+from datasets import load_dataset, IterableDataset, Audio
 from tqdm import tqdm
 
 from sample_hunter.pipeline.encoder_net import EncoderNet
-from sample_hunter.pipeline.triplet_loss import mine_negative_triplet, triplet_accuracy
+from sample_hunter.pipeline.transformations.functional import collate_spectrograms
+from sample_hunter.pipeline.transformations.transformations import (
+    SpectrogramPreprocessor,
+)
+from sample_hunter.pipeline.triplet_loss import triplet_accuracy, mine_negative_triplet
 from sample_hunter.pipeline.evaluate import evaluate
 from sample_hunter._util import (
+    CACHE_DIR,
+    DEFAULT_HOP_LENGTH,
+    DEFAULT_MEL_SPECTROGRAM,
+    DEFAULT_N_FFT,
+    DEFAULT_WINDOW_NUM_SAMPLES,
     MODEL_SAVE_PATH,
     CONV_LAYER_DIMS,
     DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
@@ -250,28 +260,33 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    train_dataset = load_dataset(
-        path=args.repo_id, split="train_1", streaming=True, token=args.token
-    ).with_format("torch")
+    preprocessor = SpectrogramPreprocessor()
 
-    test_dataset = load_dataset(
-        path=args.repo_id, split="test_1", streaming=True, token=args.token
-    ).with_format("torch")
+    def map_fn(ex):
+        positive, anchor = preprocessor(ex["audio"], obfuscate=True)
+        return {**ex, "positive": positive, "anchor": anchor}
+
+    dataset = load_dataset(
+        "samplr/songs",
+        streaming=True,
+        split="train",
+        cache_dir=Path(CACHE_DIR / "songs").__str__(),
+        token=args.token,
+    ).cast_column("audio", Audio(decode=True))
+    dataset = dataset.map(map_fn)
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        collate_fn=collate_spectrograms,
+    )
 
     if args.num:
-        train_dataset = train_dataset.shuffle()
-        train_dataset = train_dataset.take(args.num)
+        dataset = train_dataset.shuffle()
+        dataset = train_dataset.take(args.num)
 
-    assert isinstance(train_dataset, IterableDataset) and isinstance(
-        test_dataset, IterableDataset
-    )
-    assert train_dataset.features["anchor"] == train_dataset.features["positive"]  # type: ignore
-
-    input_shape = train_dataset.features["anchor"].shape  # type: ignore
-    train_dataloader = DataLoader(
-        train_dataset, batch_size=args.batch_size, num_workers=PROCS  # type: ignore
-    )
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=args.procs)  # type: ignore
+    n_f = 1 + math.floor(DEFAULT_WINDOW_NUM_SAMPLES / DEFAULT_HOP_LENGTH)
+    input_shape = torch.Size((args.n_mels, n_f))
 
     model = EncoderNet(
         conv_layer_dims=CONV_LAYER_DIMS,
