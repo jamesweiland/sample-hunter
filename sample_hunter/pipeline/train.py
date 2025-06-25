@@ -1,28 +1,25 @@
-import math
-import random
+import time
+from huggingface_hub import HfApi
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
-from typing import Callable, Tuple, Union
+from typing import Callable, List, Tuple
 import argparse
 from pathlib import Path
-from datasets import load_dataset, IterableDataset, Audio
+from datasets import load_dataset
 from tqdm import tqdm
+import webdataset as wds
 
-from sample_hunter.pipeline.encoder_net import EncoderNet
-from sample_hunter.pipeline.transformations.functional import collate_spectrograms
-from sample_hunter.pipeline.transformations.transformations import (
-    SpectrogramPreprocessor,
-)
-from sample_hunter.pipeline.triplet_loss import triplet_accuracy, mine_negative_triplet
-from sample_hunter.pipeline.evaluate import evaluate
+from .encoder_net import EncoderNet
+from .transformations.functional import collate_spectrograms
+from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
+from .triplet_loss import triplet_accuracy, mine_negative_triplet
+from .evaluate import evaluate
 from sample_hunter._util import (
     CACHE_DIR,
     DEFAULT_HOP_LENGTH,
-    DEFAULT_MEL_SPECTROGRAM,
-    DEFAULT_N_FFT,
     DEFAULT_WINDOW_NUM_SAMPLES,
     MODEL_SAVE_PATH,
     CONV_LAYER_DIMS,
@@ -38,8 +35,7 @@ from sample_hunter._util import (
     DEFAULT_BATCH_SIZE,
     DEVICE,
     TRAIN_LOG_DIR,
-    PROCS,
-    HF_DATASET,
+    HF_DATASET_REPO_ID,
     HF_TOKEN,
 )
 
@@ -150,6 +146,30 @@ def train(
     print("Finished training")
 
 
+def get_tar_files(repo_id: str, split: str, token: str) -> List[str]:
+    api = HfApi()
+
+    files = api.list_repo_files(repo_id, repo_type="dataset", token=token)
+    tar_files = [
+        file for file in files if file.startswith(f"{split}/") and file.endswith(".tar")
+    ]
+    return tar_files
+
+
+def load_webdataset(repo_id: str, split: str, token: str) -> wds.WebDataset:
+    tar_files = get_tar_files(repo_id, split, token)
+    # get all the numbers of the files
+    numbers = [int(name.split("-")[-1].split(".tar")[0]) for name in tar_files]
+    max_num = max(numbers)
+
+    max_num_str = f"{max_num:06d}"
+    pattern = f"{split}-{{000001..{max_num_str}}}.tar"
+
+    url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{split}/{pattern}"
+    pipe = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {token}'"
+    return wds.WebDataset(pipe, shardshuffle=True).shuffle(200).decode()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
@@ -161,7 +181,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--repo-id", type=str, help="The path to the HF dataset", default=HF_DATASET
+        "--repo-id", type=str, help="The HF repo id", default=HF_DATASET_REPO_ID
     )
 
     parser.add_argument(
@@ -169,10 +189,10 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--procs",
+        "--num-workers",
         type=int,
-        help="The number of processes to use for multiprocessing",
-        default=PROCS,
+        help="The number of processes to use for dataloading",
+        default=4,
     )
 
     tensorboard = parser.add_argument_group("tensorboard")
@@ -260,60 +280,100 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    preprocessor = SpectrogramPreprocessor()
+    with SpectrogramPreprocessor() as preprocessor:
 
-    def map_fn(ex):
-        positive, anchor = preprocessor(ex["audio"], obfuscate=True)
-        return {**ex, "positive": positive, "anchor": anchor}
+        def map_fn(ex):
+            positive, anchor = preprocessor(ex["mp3"], obfuscate=True)
+            return {**ex, "positive": positive, "anchor": anchor}
 
-    dataset = load_dataset(
-        "samplr/songs",
-        streaming=True,
-        split="train",
-        cache_dir=Path(CACHE_DIR / "songs").__str__(),
-        token=args.token,
-    ).cast_column("audio", Audio(decode=True))
-    dataset = dataset.map(map_fn)
+        def collate_fn(batch):
+            return collate_spectrograms(batch, col=["anchor", "positive"])
 
-    dataloader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        collate_fn=collate_spectrograms,
-    )
+        train_dataset = load_webdataset(args.repo_id, "train", args.token).map(map_fn)
 
-    if args.num:
-        dataset = train_dataset.shuffle()
-        dataset = train_dataset.take(args.num)
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            collate_fn=collate_fn,
+        )
 
-    n_f = 1 + math.floor(DEFAULT_WINDOW_NUM_SAMPLES / DEFAULT_HOP_LENGTH)
-    input_shape = torch.Size((args.n_mels, n_f))
+        i = 0
+        start = time.perf_counter()
+        for anchor, positive in train_dataloader:
 
-    model = EncoderNet(
-        conv_layer_dims=CONV_LAYER_DIMS,
-        stride=args.stride,
-        padding=args.padding,
-        pool_kernel_size=args.pool_kernel_size,
-        num_branches=args.num_branches,
-        divide_and_encode_hidden_dim=args.hidden_dim,
-        embedding_dim=args.embedding_dim,
-        input_shape=input_shape,
-    ).to(DEVICE)
+            print(f"Total time to collate batch: {time.perf_counter() - start}")
+            print(f"Anchor shape: {anchor.shape}")
+            print(f"Positive shape: {positive.shape}")
+            i += 1
+            if i == 10:
+                exit(0)
+            start = time.perf_counter()
 
-    adam = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    triplet_loss = nn.TripletMarginLoss()
+        train_dataset = load_dataset(
+            args.repo_id,
+            streaming=True,
+            split="train",
+            cache_dir=Path(CACHE_DIR / "songs").__str__(),
+            token=args.token,
+        )
 
-    train(
-        model=model,
-        train_dataloader=train_dataloader,
-        test_dataloader=test_dataloader,
-        optimizer=adam,
-        loss_fn=triplet_loss,
-        log_dir=args.log_dir,
-        tensorboard=args.tensorboard,
-        device=DEVICE,
-        num_epochs=args.num_epochs,
-        alpha=args.alpha,
-    )
+        test_dataset = load_dataset(
+            args.repo_id,
+            streaming=True,
+            split="test",
+            cache_dir=Path(CACHE_DIR / "songs").__str__(),
+            token=args.token,
+        )
+        train_dataset = train_dataset.map(map_fn)
+        test_dataset = test_dataset.map(map_fn)
 
-    torch.save(model.state_dict(), args.out)
-    print(f"Model saved to {args.out}")
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            collate_fn=lambda batch: collate_spectrograms(
+                batch, ["anchor", "positive"]
+            ),
+        )
+
+        test_dataloader = DataLoader(
+            test_dataset,
+            batch_size=args.batch_size,
+            collate_fn=collate_spectrograms,
+        )
+
+        if args.num:
+            train_dataset = train_dataset.shuffle()
+            train_dataset = train_dataset.take(args.num)
+
+        n_f = 1 + DEFAULT_WINDOW_NUM_SAMPLES // DEFAULT_HOP_LENGTH
+        input_shape = torch.Size((args.n_mels, n_f))
+
+        model = EncoderNet(
+            conv_layer_dims=CONV_LAYER_DIMS,
+            stride=args.stride,
+            padding=args.padding,
+            pool_kernel_size=args.pool_kernel_size,
+            num_branches=args.num_branches,
+            divide_and_encode_hidden_dim=args.hidden_dim,
+            embedding_dim=args.embedding_dim,
+            input_shape=input_shape,
+        ).to(DEVICE)
+
+        adam = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+        triplet_loss = nn.TripletMarginLoss()
+
+        train(
+            model=model,
+            train_dataloader=train_dataloader,
+            test_dataloader=test_dataloader,
+            optimizer=adam,
+            loss_fn=triplet_loss,
+            log_dir=args.log_dir,
+            tensorboard=args.tensorboard,
+            device=DEVICE,
+            num_epochs=args.num_epochs,
+            alpha=args.alpha,
+        )
+
+        torch.save(model.state_dict(), args.out)
+        print(f"Model saved to {args.out}")

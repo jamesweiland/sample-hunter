@@ -50,8 +50,9 @@ CONV_LAYER_DIMS: List[Tuple[int, int]] = [
 DEFAULT_NUM_BRANCHES: int = 4
 DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM: int = 192
 DEFAULT_EMBEDDING_DIM: int = 96
-# it is important to use a very large batch size for triplet mining
-DEFAULT_BATCH_SIZE: int = 1_000
+# note: this batch size is the *number of songs sampled*, not the number of spectrograms the
+# networks trains on at a time
+DEFAULT_BATCH_SIZE: int = 10
 DEFAULT_LEARNING_RATE: float = 0.005
 DEFAULT_NUM_EPOCHS: int = 10
 DEFAULT_ALPHA: float = 0.2
@@ -81,7 +82,8 @@ ANNOTATIONS_PATH: Path = Path(DATA_SAVE_DIR / "new_annotations.csv")
 AUDIO_DIR: Path = Path(DATA_SAVE_DIR / "audio-dir/")
 MODEL_SAVE_PATH: Path = Path(DATA_SAVE_DIR / "test.pth")
 TRAIN_LOG_DIR: Path = Path("_data/logs")
-HF_DATASET: str = "samplr/audio-obfuscation"
+HF_DATASET_REPO_ID: str = "samplr/songs"
+HF_DATASET_URL: str = "https://huggingface.co/datasets/samplr/songs"
 HF_TOKEN: str = os.environ.get("HF_TOKEN", "")
 
 

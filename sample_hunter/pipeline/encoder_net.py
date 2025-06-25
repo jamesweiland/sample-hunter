@@ -4,7 +4,6 @@ from torch import Tensor
 from torchsummary import summary
 from typing import List, Tuple
 
-from sample_hunter.pipeline.song_pairs_dataset import SongPairsDataset
 from sample_hunter._util import (
     DEFAULT_STRIDE,
     DEFAULT_PADDING,
@@ -14,11 +13,6 @@ from sample_hunter._util import (
     DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
     DEFAULT_EMBEDDING_DIM,
     DEVICE,
-    AUDIO_DIR,
-    ANNOTATIONS_PATH,
-    DEFAULT_MEL_SPECTROGRAM,
-    DEFAULT_SAMPLE_RATE,
-    DEFAULT_WINDOW_NUM_SAMPLES,
 )
 
 
@@ -99,17 +93,14 @@ class EncoderNet(nn.Module):
 
 
 if __name__ == "__main__":
-
-    dataset = SongPairsDataset(
-        audio_dir=AUDIO_DIR,
-        annotations_file=ANNOTATIONS_PATH,
-        mel_spectrogram=DEFAULT_MEL_SPECTROGRAM,
-        target_sample_rate=DEFAULT_SAMPLE_RATE,
-        num_samples=DEFAULT_WINDOW_NUM_SAMPLES,
-        device=DEVICE,
+    from sample_hunter._util import (
+        DEFAULT_WINDOW_NUM_SAMPLES,
+        DEFAULT_HOP_LENGTH,
+        DEFAULT_N_MELS,
     )
 
-    input_shape = dataset.shape()
+    n_f = 1 + DEFAULT_WINDOW_NUM_SAMPLES // DEFAULT_HOP_LENGTH
+    input_shape = torch.Size((DEFAULT_N_MELS, n_f))
 
     model = EncoderNet(
         conv_layer_dims=CONV_LAYER_DIMS,
