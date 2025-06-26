@@ -120,8 +120,10 @@ class Obfuscator(BaseModel):
         # generate decisions per snippet in the batch
         lowpass_mask = (
             torch.rand(signal.shape[0], device=signal.device) < self.lowpass_frac
+        ).to(signal.device)
+        frequencies = torch.zeros(
+            signal.shape[0], dtype=torch.int, device=signal.device
         )
-        frequencies = torch.zeros(signal.shape[0], dtype=torch.int)
 
         low_idx = lowpass_mask.nonzero().squeeze(1)
         low_freqs = torch.randint(
