@@ -5,20 +5,24 @@ import torch
 import torchaudio
 import torch.multiprocessing as mp
 
-from sample_hunter._util import PROCS
+from sample_hunter._util import DEVICE, PROCS
 
 __all__ = ["BatchedPitchPerturbation"]
 
 
 def _init_worker(
-    function, factors: List[Fraction], sample_rate: int, threads_per_worker: int
+    function,
+    factors: List[Fraction],
+    sample_rate: int,
+    threads_per_worker: int,
+    device: str = DEVICE,
 ):
     function.shifters = [
         torchaudio.transforms.PitchShift(
             sample_rate=sample_rate,
             n_steps=factor.numerator,
             bins_per_octave=factor.denominator,
-        )
+        ).to(device)
         for factor in factors
     ]
     torch.set_num_threads(threads_per_worker)
@@ -68,7 +72,7 @@ class BatchedPitchPerturbation:
                     sample_rate=self.sample_rate,
                     n_steps=factor.numerator,
                     bins_per_octave=factor.denominator,
-                )
+                ).to(self.device)
                 for factor in self.factors
             ]
             self._streams = [

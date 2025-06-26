@@ -18,11 +18,12 @@ def _init_worker(
     hop_length: int,
     window: torch.Tensor,
     threads_per_worker: int,
+    device: str = DEVICE,
 ):
     function.stretchers = [
         torchaudio.transforms.TimeStretch(
             hop_length=hop_length, fixed_rate=factor, n_freq=hop_length + 1
-        )
+        ).to(device)
         for factor in factors
     ]
     function.window = window
@@ -90,7 +91,7 @@ class BatchedTimeStretchPerturbation:
                     hop_length=self.hop_length,
                     fixed_rate=factor,
                     n_freq=self.hop_length + 1,
-                )
+                ).to(self.device)
                 for factor in self.factors
             ]
             self._streams = [
