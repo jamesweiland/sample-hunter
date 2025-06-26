@@ -139,7 +139,7 @@ class BatchedTimeStretchPerturbation:
                 with torch.cuda.Stream(self._streams[i]):
                     ob[mask] = resize(
                         torch.istft(
-                            self.stretchers[i](spec),
+                            self.stretchers[i](sub_batch),
                             n_fft=self.n_fft,
                             hop_length=self.hop_length,
                             window=self.window,
