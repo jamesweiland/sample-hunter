@@ -5,9 +5,6 @@ import multiprocessing
 import threading
 import torch
 import torchaudio
-from torchaudio.transforms import AmplitudeToDB
-from torch import Tensor
-import matplotlib.pyplot as plt
 from typing import Any
 from abc import ABC, abstractmethod
 
@@ -47,20 +44,6 @@ DEFAULT_REQUEST_TIMEOUT: float = 15.0
 DEFAULT_DOWNLOAD_TIME: float = 2700.0
 DEFAULT_RETRIES: int = 5
 DEFAULT_RETRY_DELAY: float = 5.0
-
-
-def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
-    """Plot a torch Tensor as a spectrogram"""
-    tensor = tensor.squeeze().cpu()
-    tensor = AmplitudeToDB()(tensor)
-
-    plt.figure(figsize=(12, 4))
-    plt.imshow(tensor.numpy(), aspect="auto", origin="lower", cmap="viridis")
-    plt.colorbar(format="%+2.0f dB")
-    plt.title(title)
-    plt.ylabel("Mel Frequency Bin")
-    plt.xlabel("Time Frame")
-    plt.show()
 
 
 def save_to_json_or_csv(path: Path, df: pd.DataFrame) -> None:
