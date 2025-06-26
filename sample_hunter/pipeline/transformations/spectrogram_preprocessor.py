@@ -7,18 +7,16 @@ import io
 import torch
 import torchaudio
 from typing import Dict, Tuple, Union
-from torch.utils.data import DataLoader
 
 from .obfuscator import Obfuscator
-from .functional import collate_spectrograms, resize
+from .functional import resize
 from sample_hunter._util import (
     DEVICE,
-    DEFAULT_MEL_SPECTROGRAM,
-    DEFAULT_SAMPLE_RATE,
-    DEFAULT_WINDOW_NUM_SAMPLES,
-    DEFAULT_STEP_NUM_SAMPLES,
-    CACHE_DIR,
+    MEL_SPECTROGRAM,
+    STEP_NUM_SAMPLES,
+    WINDOW_NUM_SAMPLES,
 )
+from sample_hunter.cfg import config
 
 
 class SpectrogramPreprocessor:
@@ -29,10 +27,10 @@ class SpectrogramPreprocessor:
 
     def __init__(
         self,
-        mel_spectrogram: torchaudio.transforms.MelSpectrogram = DEFAULT_MEL_SPECTROGRAM,
-        target_sample_rate: int = DEFAULT_SAMPLE_RATE,
-        window_num_samples: int = DEFAULT_WINDOW_NUM_SAMPLES,
-        step_num_samples: int = DEFAULT_STEP_NUM_SAMPLES,
+        mel_spectrogram: torchaudio.transforms.MelSpectrogram = MEL_SPECTROGRAM,
+        target_sample_rate: int = config.preprocess.sample_rate,
+        window_num_samples: int = WINDOW_NUM_SAMPLES,
+        step_num_samples: int = STEP_NUM_SAMPLES,
         obfuscator: Obfuscator = Obfuscator(),
         device: str = DEVICE,
     ):
@@ -78,7 +76,6 @@ class SpectrogramPreprocessor:
         `sample_rate` must be provided if a `torch.Tensor` is passed.
         """
         with torch.no_grad():
-
             if isinstance(data, Dict):
                 # it is a huggingface Audio object
                 signal = torch.tensor(
@@ -207,72 +204,3 @@ class SpectrogramPreprocessor:
             windows = torch.cat([windows, last_segment], dim=1)
 
         return windows.transpose(0, 1).to(self.device)
-
-
-if __name__ == "__main__":
-    # test the obfuscations
-    import argparse
-    import memray
-    from sample_hunter._util import plot_spectrogram, HF_TOKEN
-    from pathlib import Path
-    from datasets import load_dataset, Audio
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--token", type=str, required=False)
-    args = parser.parse_args()
-    if args.token is None:
-        args.token = HF_TOKEN
-
-    # test hf_audio_to_spectrogram and the collate fn
-    with SpectrogramPreprocessor() as preprocessor:
-        # print("Downloading dataset")
-        # ds = load_dataset("samplr/songs", streaming=True, split="train")
-        # print("Download complete, applying map")
-        # ds = ds.map(lambda ex: {**ex, "transform": preprocessor(ex["audio"])})
-        # print("map complete, making dataloader")
-
-        # dataloader = DataLoader(
-        #     ds, batch_size=2, collate_fn=SpectrogramPreprocessor.collate_spectrograms
-        # )
-        # print("dataloader done, starting loop")
-        # for batch in dataloader:
-
-        #     print("Concatenated batch shape:")
-        #     print(batch.size())
-
-        # test the obfuscation stuff
-        def map_fn(ex):
-            positive, anchor = preprocessor(ex["audio"], obfuscate=True)
-            return {**ex, "positive": positive, "anchor": anchor}
-
-        with memray.Tracker("output.bin"):
-
-            obf_ds = load_dataset(
-                "samplr/songs",
-                streaming=True,
-                split="train",
-                cache_dir=Path(CACHE_DIR / "songs").__str__(),
-                token=args.token,
-            ).cast_column("audio", Audio(decode=True))
-            obf_ds = obf_ds.map(map_fn)
-
-            dataloader = DataLoader(
-                obf_ds,
-                batch_size=2,
-                collate_fn=collate_spectrograms,
-            )
-            i = 0
-            for anchor, positive in dataloader:
-                print("Concatenated batch shape:")
-                print(anchor.size())
-                print(positive.size())
-
-                for i in range(2):
-                    plot_spectrogram(anchor[i], f"Anchor {i}")
-                    plot_spectrogram(positive[i], f"Positive {i}")
-
-                break
-                i += 1
-                if i == 10:
-                    break
-        print("done")
