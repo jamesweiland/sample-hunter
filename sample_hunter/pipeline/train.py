@@ -40,6 +40,9 @@ def train_single_epoch(
     num_batches = 0
     epoch_total_accuracy = 0
     for anchor, positive, keys in tqdm(dataloader, desc="Training epoch..."):
+        print(anchor.shape)
+        print(positive.shape)
+        print(keys.shape)
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
@@ -267,9 +270,12 @@ if __name__ == "__main__":
             positive, anchor = preprocessor(ex["mp3"], obfuscate=True)
             return {**ex, "positive": positive, "anchor": anchor}
 
-        def collate_fn(batch):
-            keys = torch.tensor([int(ex["__key__"]) for ex in batch])
-            return (*collate_spectrograms(batch, col=["anchor", "positive"]), keys)
+        def collate_fn(songs):
+            keys = torch.tensor([int(song["__key__"]) for song in songs])
+            windows_per_song = [song["anchor"].shape[0] for song in songs]
+            keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
+
+            return (*collate_spectrograms(songs, col=["anchor", "positive"]), keys)
 
         train_dataset = load_webdataset(config.hf.repo_id, "train", args.token).map(
             map_fn
