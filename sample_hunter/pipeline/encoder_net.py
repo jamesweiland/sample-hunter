@@ -1,32 +1,22 @@
 import torch
 import torch.nn as nn
-from torch import Tensor
-from torchsummary import summary
 from typing import List, Tuple
 
-from sample_hunter._util import (
-    DEFAULT_STRIDE,
-    DEFAULT_PADDING,
-    DEFAULT_POOL_KERNEL_SIZE,
-    CONV_LAYER_DIMS,
-    DEFAULT_NUM_BRANCHES,
-    DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
-    DEFAULT_EMBEDDING_DIM,
-    DEVICE,
-)
+from sample_hunter._util import INPUT_SHAPE
+from sample_hunter.cfg import config
 
 
 class EncoderNet(nn.Module):
     def __init__(
         self,
-        input_shape: torch.Size,
-        conv_layer_dims: List[Tuple[int, int]] = CONV_LAYER_DIMS,
-        stride: int = DEFAULT_STRIDE,
-        padding: int = DEFAULT_PADDING,
-        pool_kernel_size: int = DEFAULT_POOL_KERNEL_SIZE,
-        num_branches: int = DEFAULT_NUM_BRANCHES,
-        divide_and_encode_hidden_dim: int = DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
-        embedding_dim: int = DEFAULT_EMBEDDING_DIM,
+        input_shape: torch.Size = INPUT_SHAPE,
+        conv_layer_dims: List[Tuple[int, int]] = config.network.conv_layer_dims,
+        stride: int = config.network.stride,
+        padding: int = config.network.padding,
+        pool_kernel_size: int = config.network.pool_kernel_size,
+        num_branches: int = config.network.num_branches,
+        divide_and_encode_hidden_dim: int = config.network.divide_and_encode_hidden_dim,
+        embedding_dim: int = config.network.embedding_dim,
     ):
         super().__init__()
 
@@ -70,7 +60,7 @@ class EncoderNet(nn.Module):
         )
         self.num_branches = num_branches
 
-    def forward(self, x: Tensor):
+    def forward(self, x: torch.Tensor):
         for block in self.conv_blocks:
             x = block(x)
 
@@ -93,23 +83,13 @@ class EncoderNet(nn.Module):
 
 
 if __name__ == "__main__":
-    from sample_hunter._util import (
-        DEFAULT_WINDOW_NUM_SAMPLES,
-        DEFAULT_HOP_LENGTH,
-        DEFAULT_N_MELS,
-    )
+    from sample_hunter._util import WINDOW_NUM_SAMPLES, DEVICE
+    from torchsummary import summary
 
-    n_f = 1 + DEFAULT_WINDOW_NUM_SAMPLES // DEFAULT_HOP_LENGTH
-    input_shape = torch.Size((DEFAULT_N_MELS, n_f))
+    n_f = 1 + WINDOW_NUM_SAMPLES // config.preprocess.hop_length
+    input_shape = torch.Size((config.preprocess.n_mels, n_f))
 
     model = EncoderNet(
-        conv_layer_dims=CONV_LAYER_DIMS,
-        stride=DEFAULT_STRIDE,
-        padding=DEFAULT_PADDING,
-        pool_kernel_size=DEFAULT_POOL_KERNEL_SIZE,
-        num_branches=DEFAULT_NUM_BRANCHES,
-        divide_and_encode_hidden_dim=DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
-        embedding_dim=DEFAULT_EMBEDDING_DIM,
         input_shape=input_shape,
     ).to(DEVICE)
 

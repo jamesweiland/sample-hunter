@@ -1,4 +1,3 @@
-import time
 from huggingface_hub import HfApi
 import torch
 import torch.nn as nn
@@ -8,9 +7,9 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import Callable, List, Tuple
 import argparse
 from pathlib import Path
-from datasets import load_dataset
 from tqdm import tqdm
 import webdataset as wds
+
 
 from .encoder_net import EncoderNet
 from .transformations.functional import collate_spectrograms
@@ -18,26 +17,10 @@ from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
 from .triplet_loss import triplet_accuracy, mine_negative_triplet
 from .evaluate import evaluate
 from sample_hunter._util import (
-    CACHE_DIR,
-    DEFAULT_HOP_LENGTH,
-    DEFAULT_WINDOW_NUM_SAMPLES,
-    MODEL_SAVE_PATH,
-    CONV_LAYER_DIMS,
-    DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
-    DEFAULT_EMBEDDING_DIM,
-    DEFAULT_NUM_BRANCHES,
-    DEFAULT_PADDING,
-    DEFAULT_POOL_KERNEL_SIZE,
-    DEFAULT_STRIDE,
-    DEFAULT_LEARNING_RATE,
-    DEFAULT_NUM_EPOCHS,
-    DEFAULT_ALPHA,
-    DEFAULT_BATCH_SIZE,
     DEVICE,
-    TRAIN_LOG_DIR,
-    HF_DATASET_REPO_ID,
     HF_TOKEN,
 )
+from sample_hunter.cfg import config
 
 
 def train_single_epoch(
@@ -56,10 +39,10 @@ def train_single_epoch(
     epoch_total_loss = 0
     num_batches = 0
     epoch_total_accuracy = 0
-    for batch in tqdm(dataloader, desc="Training epoch..."):
-        anchor_batch = batch["anchor"].to(device)
-        positive_batch = batch["positive"].to(device)
-        song_ids = batch["song_id"].to(device)
+    for anchor, positive, keys in tqdm(dataloader, desc="Training epoch..."):
+        anchor_batch = anchor.to(device)
+        positive_batch = positive.to(device)
+        keys = keys.to(device)
 
         # predict embeddings
         anchor_embeddings = model(anchor_batch)
@@ -69,7 +52,7 @@ def train_single_epoch(
         negative_embeddings = mine_negative_triplet(
             anchor_embeddings=anchor_embeddings,
             positive_embeddings=positive_embeddings,
-            song_ids=song_ids,
+            song_ids=keys,
             alpha=alpha,
         )
         # calculate loss
@@ -112,16 +95,57 @@ def train(
     train_dataloader: DataLoader,
     loss_fn: Callable,
     optimizer: torch.optim.Optimizer,
-    test_dataloader: DataLoader | None = None,
+    num_epochs: range,
+    alpha: float,
     tensorboard: str = "none",
+    log_dir: Path | None = None,
+    test_dataloader: DataLoader | None = None,
+    save_per_epoch: Path | None = None,
     device: str = DEVICE,
-    num_epochs: int = DEFAULT_NUM_EPOCHS,
-    alpha: float = DEFAULT_ALPHA,
-    log_dir: Path = TRAIN_LOG_DIR,
 ):
-    writer = SummaryWriter(log_dir=log_dir)
-    for i in range(num_epochs):
-        print(f"Epoch {i + 1}")
+    """
+    `model`: The neural network to train.
+
+    `train_dataloader`: A `torch.util.data.DataLoader` made from a train dataset. This dataloader must
+    yield a (anchor, positive, key) triplet.
+
+    `loss_fn`: The loss function to use for learning. Must be a triplet loss function or a derivation of it.
+
+    `optimizer`: A `torch.optim.Optimizer` instance.
+
+    `num_epochs`: A range object that represents the number of epochs to train.
+
+    `alpha`: The alpha margin to use for triplet mining per-batch.
+
+    `tensorboard`: Must be one of 'none', 'batch', or 'epoch'. If 'none', tensorboard will not be used.
+    If `batch`, tensorboard metrics will be logged per-batch. If `epoch`, they will be logged per epoch.
+
+    `log_dir`: If `tensorboard` is not `none`, then the path to the log_dir must be specified as well.
+
+    `test_dataloader`: If given, the model will also be evaluated per epoch on a test dataset.
+
+    `save_per_epoch`: If given, save the model to the provided path's directory at the end of each epoch,
+    with '-<epoch_num>' appended to the end of the given path's stem.
+
+    `device`: The device to use.
+    """
+    if tensorboard != "none":
+        if tensorboard != "batch" and tensorboard != "epoch":
+            raise ValueError(
+                "An illegal option was given for tensorboard.\n"
+                'tensorboard must be one of: ["none", "batch", "epoch"]\n'
+                f"tensorboard was given as: {tensorboard}"
+            )
+        if log_dir == None:
+            raise ValueError(
+                "log_dir must be specified in order to use tensorboard.\n"
+                f"tensorboard was given as: {tensorboard}"
+            )
+
+        writer = SummaryWriter(log_dir=log_dir)
+
+    for i in num_epochs:
+        print(f"Epoch {i}")
         loss, accuracy = train_single_epoch(
             model=model,
             dataloader=train_dataloader,
@@ -131,18 +155,27 @@ def train(
             alpha=alpha,
         )
         if tensorboard == "epoch":
-            writer.add_scalar("Training loss", loss, i)
-            writer.add_scalar("Training accuracy", accuracy, i)
+            writer.add_scalar("Training loss", loss, i)  # type: ignore
+            writer.add_scalar("Training accuracy", accuracy, i)  # type: ignore
 
         if test_dataloader is not None:
             # evaluate accuracy as we go on the test set
             accuracy = evaluate(
                 model=model, dataloader=test_dataloader, alpha=alpha, device=device
             )
-            writer.add_scalar("Testing accuracy", accuracy, i)
+            if tensorboard != "none":
+                writer.add_scalar("Testing accuracy", accuracy, i)  # type: ignore
+
+        if save_per_epoch is not None and i != num_epochs.stop - 1:
+            save_path = (
+                save_per_epoch.parent
+                / f"{save_per_epoch.stem}-{i}{save_per_epoch.suffix}"
+            )
+            torch.save(model.state_dict(), save_path)
 
         print("--------------------------------------------")
-    writer.close()
+    if tensorboard != "none":
+        writer.close()  # type: ignore
     print("Finished training")
 
 
@@ -174,17 +207,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--out",
-        type=Path,
-        help="The path to save the trained model to",
-        default=MODEL_SAVE_PATH,
-    )
-
-    parser.add_argument(
-        "--repo-id", type=str, help="The HF repo id", default=HF_DATASET_REPO_ID
-    )
-
-    parser.add_argument(
         "--token", type=str, help="Your huggingface token", default=HF_TOKEN
     )
 
@@ -192,7 +214,14 @@ def parse_args() -> argparse.Namespace:
         "--num-workers",
         type=int,
         help="The number of processes to use for dataloading",
-        default=4,
+        default=1,
+    )
+
+    parser.add_argument(
+        "--from",
+        dest="from_",
+        type=Path,
+        help="Option to load in a model to continue training instead of starting a new model",
     )
 
     tensorboard = parser.add_argument_group("tensorboard")
@@ -200,79 +229,31 @@ def parse_args() -> argparse.Namespace:
         "--log-dir",
         type=Path,
         help="The path to the log directory for tensorboard",
-        default=TRAIN_LOG_DIR,
+        default=config.paths.log_dir,
     )
     tensorboard.add_argument(
         "--tensorboard",
         help="Specify whether to write tensorboard data per batch, epoch, or not at all",
         type=str,
         choices=["none", "batch", "epoch"],
-    )
-
-    hyperparams = parser.add_argument_group("Network hyperparameters")
-    hyperparams.add_argument(
-        "--num-epochs",
-        type=int,
-        help="The number of epochs to train the model for",
-        default=DEFAULT_NUM_EPOCHS,
-    )
-    hyperparams.add_argument(
-        "--stride",
-        help="The stride of the convolutional kernel",
-        type=int,
-        default=DEFAULT_STRIDE,
-    )
-    hyperparams.add_argument(
-        "--padding",
-        help="The padding for the convolutions",
-        type=int,
-        default=DEFAULT_PADDING,
-    )
-    hyperparams.add_argument(
-        "--pool-kernel-size",
-        help="The kernel size to use for pooling",
-        type=int,
-        default=DEFAULT_POOL_KERNEL_SIZE,
-    )
-    hyperparams.add_argument(
-        "--num-branches",
-        help="The number of parallel branches to use in the divide and encode layer",
-        type=int,
-        default=DEFAULT_NUM_BRANCHES,
-    )
-    hyperparams.add_argument(
-        "--hidden-dim",
-        help="The hidden dimension of the divide and encode layer",
-        default=DEFAULT_DIVIDE_AND_ENCODE_HIDDEN_DIM,
-        type=int,
-    )
-    hyperparams.add_argument(
-        "--embedding-dim",
-        help="The dimension of the output embeddings",
-        type=int,
-        default=DEFAULT_EMBEDDING_DIM,
-    )
-    hyperparams.add_argument(
-        "--alpha",
-        help="The margin to use for triplet loss and mining",
-        type=float,
-        default=DEFAULT_ALPHA,
-    )
-    hyperparams.add_argument(
-        "--learning-rate",
-        help="The learning rate of the optimizer",
-        type=float,
-        default=DEFAULT_LEARNING_RATE,
-    )
-    hyperparams.add_argument(
-        "--batch-size",
-        help="The batch size for the dataloader",
-        type=int,
-        default=DEFAULT_BATCH_SIZE,
+        default="none",
     )
 
     dev = parser.add_argument_group("dev")
     dev.add_argument("--num", help="train only a sample of the dataset", type=int)
+    dev.add_argument(
+        "--save-per-epoch",
+        help="Option to save the model upon training each epoch",
+        action="store_true",
+    )
+    dev.add_argument(
+        "--continue",
+        dest="continue_",
+        help="Option to continue from the last trained epoch to the config's num_epochs, if the saved model has a filename ending in -<last_trained_epoch>",
+        action="store_true",
+    )
+
+    parser.add_argument("out", type=Path, help="The path to save the trained model to")
 
     return parser.parse_args()
 
@@ -287,79 +268,73 @@ if __name__ == "__main__":
             return {**ex, "positive": positive, "anchor": anchor}
 
         def collate_fn(batch):
-            return collate_spectrograms(batch, col=["anchor", "positive"])
+            keys = torch.tensor([int(ex["__key__"]) for ex in batch])
+            return (*collate_spectrograms(batch, col=["anchor", "positive"]), keys)
 
-        train_dataset = load_webdataset(args.repo_id, "train", args.token).map(map_fn)
+        train_dataset = load_webdataset(config.hf.repo_id, "train", args.token).map(
+            map_fn
+        )
 
         train_dataloader = DataLoader(
             train_dataset,
-            batch_size=args.batch_size,
+            batch_size=config.network.batch_size,
             collate_fn=collate_fn,
         )
 
-        i = 0
-        start = time.perf_counter()
-        for anchor, positive in train_dataloader:
-
-            print(f"Total time to collate batch: {time.perf_counter() - start}")
-            print(f"Anchor shape: {anchor.shape}")
-            print(f"Positive shape: {positive.shape}")
-            i += 1
-            if i == 10:
-                exit(0)
-            start = time.perf_counter()
-
-        train_dataset = load_dataset(
-            args.repo_id,
-            streaming=True,
-            split="train",
-            cache_dir=Path(CACHE_DIR / "songs").__str__(),
-            token=args.token,
-        )
-
-        test_dataset = load_dataset(
-            args.repo_id,
-            streaming=True,
-            split="test",
-            cache_dir=Path(CACHE_DIR / "songs").__str__(),
-            token=args.token,
-        )
-        train_dataset = train_dataset.map(map_fn)
-        test_dataset = test_dataset.map(map_fn)
-
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_size=args.batch_size,
-            collate_fn=lambda batch: collate_spectrograms(
-                batch, ["anchor", "positive"]
-            ),
+        test_dataset = load_webdataset(config.hf.repo_id, "test", args.token).map(
+            map_fn
         )
 
         test_dataloader = DataLoader(
-            test_dataset,
-            batch_size=args.batch_size,
-            collate_fn=collate_spectrograms,
+            test_dataset, batch_size=config.network.batch_size, collate_fn=collate_fn
         )
 
         if args.num:
             train_dataset = train_dataset.shuffle()
             train_dataset = train_dataset.take(args.num)
 
-        n_f = 1 + DEFAULT_WINDOW_NUM_SAMPLES // DEFAULT_HOP_LENGTH
-        input_shape = torch.Size((args.n_mels, n_f))
+        if args.continue_:
+            if not args.from_:
+                raise ValueError("--continue was given with no model to load in")
+            if not args.from_.exists():
+                raise ValueError(f"--from not found: {args.from_}")
+            if (
+                str(args.from_.stem).count("-") != 1
+                and not str(args.from_.stem).split("-")[-1].isdigit()
+            ):
+                raise ValueError(
+                    f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
+                    "The stem must follow the format: <stem_name>-<epoch>"
+                )
 
-        model = EncoderNet(
-            conv_layer_dims=CONV_LAYER_DIMS,
-            stride=args.stride,
-            padding=args.padding,
-            pool_kernel_size=args.pool_kernel_size,
-            num_branches=args.num_branches,
-            divide_and_encode_hidden_dim=args.hidden_dim,
-            embedding_dim=args.embedding_dim,
-            input_shape=input_shape,
-        ).to(DEVICE)
+            epochs_already_trained = int(str(args.from_).split("-")[-1])
+            if epochs_already_trained >= config.network.num_epochs:
+                raise ValueError(
+                    "The model has already been trained for more epochs than specified in the config for num_epochs\n"
+                    f"Epochs already trained: {epochs_already_trained}\n"
+                    f"Config num_epochs: {config.network.num_epochs}"
+                )
 
-        adam = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+            model = torch.load(args.from_, weights_only=False).to(DEVICE)
+            num_epochs = range(
+                epochs_already_trained + 1, config.network.num_epochs + 1
+            )
+        elif args.from_:
+            if not args.from_.exists():
+                raise ValueError(f"--from not found: {args.from_}")
+
+            model = torch.load(args.from_, weights_only=False).to(DEVICE)
+            num_epochs = range(1, config.network.num_epochs + 1)
+        else:
+            # make a new model
+            model = EncoderNet().to(DEVICE)
+            num_epochs = range(1, config.network.num_epochs + 1)
+
+        save_per_epoch = args.out if args.save_per_epoch else None
+
+        model = EncoderNet().to(DEVICE)
+
+        adam = torch.optim.Adam(model.parameters(), lr=config.network.learning_rate)
         triplet_loss = nn.TripletMarginLoss()
 
         train(
@@ -371,8 +346,9 @@ if __name__ == "__main__":
             log_dir=args.log_dir,
             tensorboard=args.tensorboard,
             device=DEVICE,
-            num_epochs=args.num_epochs,
-            alpha=args.alpha,
+            num_epochs=num_epochs,
+            alpha=config.network.alpha,
+            save_per_epoch=save_per_epoch,
         )
 
         torch.save(model.state_dict(), args.out)

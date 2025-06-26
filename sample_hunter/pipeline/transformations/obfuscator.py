@@ -2,18 +2,14 @@ from functools import cached_property
 import math
 import torch
 from pydantic import BaseModel, field_validator
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import torchaudio
 
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
-from sample_hunter._util import (
-    DEFAULT_HOP_LENGTH,
-    DEFAULT_N_FFT,
-    DEFAULT_SAMPLE_RATE,
-    DEVICE,
-)
+from sample_hunter._util import DEVICE
+from sample_hunter.cfg import config
 
 
 class Obfuscator(BaseModel):
@@ -43,16 +39,20 @@ class Obfuscator(BaseModel):
         `device`: either 'cuda' or 'cpu'
     """
 
-    time_stretch_factors: List[float] = [0.75, 1, 1.25, 1.5]
-    pitch_factors: List[float] = [0.6, 0.8, 1, 1.2, 1.5]
-    lowpass_range: Tuple[int, int] = (2000, 3000)
-    highpass_range: Tuple[int, int] = (500, 1500)
-    whitenoise_range: Tuple[float, float] = (0.00, 0.1)
-    lowpass_frac: float = 0.5
+    time_stretch_factors: Sequence[float] = (
+        config.preprocess.obfuscator.time_stretch_factors
+    )
+    pitch_factors: Sequence[float] = config.preprocess.obfuscator.pitch_factors
+    lowpass_range: Tuple[int, int] = config.preprocess.obfuscator.lowpass_range
+    highpass_range: Tuple[int, int] = config.preprocess.obfuscator.highpass_range
+    whitenoise_range: Tuple[float, float] = (
+        config.preprocess.obfuscator.whitenoise_range
+    )
+    lowpass_frac: float = config.preprocess.obfuscator.lowpass_frac
     device: str = DEVICE
-    sample_rate: int = DEFAULT_SAMPLE_RATE
-    n_fft: int = DEFAULT_N_FFT
-    hop_length: int = DEFAULT_HOP_LENGTH
+    sample_rate: int = config.preprocess.sample_rate
+    n_fft: int = config.preprocess.n_fft
+    hop_length: int = config.preprocess.hop_length
 
     @cached_property
     def time_stretch_perturbation(self) -> BatchedTimeStretchPerturbation:

@@ -1,6 +1,6 @@
 from fractions import Fraction
 import math
-from typing import List
+from typing import List, Sequence
 import torch
 import torchaudio
 import torch.multiprocessing as mp
@@ -25,18 +25,18 @@ def _init_worker(
 
 
 def _worker_func(i, mask, sub_batch):
-    res = _worker_func.shifters[i](sub_batch).detach()
+    res = _worker_func.shifters[i](sub_batch).detach()  # type: ignore
     return res, mask
 
 
 class BatchedPitchPerturbation:
     def __init__(
-        self, factors: List[float], sample_rate: int, num_workers: int, device: str
+        self, factors: Sequence[float], sample_rate: int, num_workers: int, device: str
     ):
-        self.factors = [-math.log2(rate) for rate in factors]
+        factors = [-math.log2(rate) for rate in factors]
         # ensure that the n_steps are rational by converting them to a Fraction
         self.factors = [
-            Fraction(n_steps).limit_denominator(1000) for n_steps in self.factors
+            Fraction(n_steps).limit_denominator(1000) for n_steps in factors
         ]
 
         if device == "cuda" or device == "cpu":

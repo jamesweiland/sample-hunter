@@ -1,10 +1,11 @@
-from typing import List
+from typing import List, Sequence
 import torch
 import torch.multiprocessing as mp
 import torchaudio
 
-from sample_hunter._util import DEFAULT_HOP_LENGTH, DEFAULT_N_FFT, DEVICE, PROCS
 from .functional import resize
+from sample_hunter._util import DEVICE, PROCS
+from sample_hunter.cfg import config
 
 
 __all__ = ["BatchedTimeStretchPerturbation"]
@@ -48,9 +49,9 @@ def _worker_func(i: int, mask: torch.Tensor, spec: torch.Tensor, ori_size: int):
 class BatchedTimeStretchPerturbation:
     def __init__(
         self,
-        factors: List[float],
-        n_fft: int = DEFAULT_N_FFT,
-        hop_length: int = DEFAULT_HOP_LENGTH,
+        factors: Sequence[float],
+        n_fft: int = config.preprocess.n_fft,
+        hop_length: int = config.preprocess.hop_length,
         num_workers: int = PROCS,
         device: str = DEVICE,
     ):
