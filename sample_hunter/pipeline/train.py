@@ -131,6 +131,7 @@ def train(
 
     `device`: The device to use.
     """
+    writer = None
     if tensorboard != "none":
         if tensorboard != "batch" and tensorboard != "epoch":
             raise ValueError(
@@ -155,6 +156,7 @@ def train(
             optimizer=optimizer,
             device=device,
             alpha=alpha,
+            writer=writer if tensorboard == "batch" else None,
         )
         if tensorboard == "epoch":
             writer.add_scalar("Training loss", loss, i)  # type: ignore
