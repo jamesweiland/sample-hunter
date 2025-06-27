@@ -167,6 +167,7 @@ def train(
             accuracy = evaluate(
                 model=model, dataloader=test_dataloader, alpha=alpha, device=device
             )
+            print("We made it past testing")
             if tensorboard != "none":
                 writer.add_scalar("Testing accuracy", accuracy, i)  # type: ignore
 
@@ -307,8 +308,7 @@ if __name__ == "__main__":
         )
 
         if args.num:
-            train_dataset = train_dataset.shuffle()
-            train_dataset = train_dataset.take(args.num)
+            train_dataset = train_dataset.slice(args.num)
 
         if args.continue_:
             if not args.from_:
