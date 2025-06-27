@@ -14,7 +14,17 @@ def flatten_sub_batches(
     returns a list of tensors. This yields the tensors in the list, one at a time.
     This expects the dataloader to yield a list of tuples
     """
-    for batch in dataloader:
+    dataloader_iter = iter(dataloader)
+    while True:
+        try:
+            batch = next(dataloader_iter)
+        except StopIteration:
+            break  # End of dataloader
+        except Exception as e:
+            print("An error occurred while fetching a batch from the dataloader")
+            print(str(e))
+            continue
+
         for sub_batch in batch:
             yield sub_batch
 
