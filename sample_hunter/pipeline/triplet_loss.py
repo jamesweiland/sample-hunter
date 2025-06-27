@@ -2,6 +2,7 @@
 Triplet loss functions to be used in training and evaluation
 """
 
+import warnings
 import torch
 from torch import Tensor
 
@@ -76,10 +77,11 @@ def mine_negative_triplet(
                 # edge case: all samples in the batch are from the same song
                 # this should never happen. if this happens then the batch size
                 # is too small
-                print(
-                    "WARNING: all tensors in batch are from the same song. INCREASE THE BATCH SIZE!!!!"
+                # in this case, we just take the hardest example
+                warnings.warn(
+                    "All tensors in batch are from the same song. INCREASE THE BATCH SIZE!!!!"
                 )
-                hardest = neg_dists[i][torch.argmin(neg_dists[i])]
-                negatives[i] = anchor_embeddings[hardest]
+                hardest_idx = torch.argmin(neg_dists[i])
+                negatives[i] = anchor_embeddings[hardest_idx]
 
     return negatives
