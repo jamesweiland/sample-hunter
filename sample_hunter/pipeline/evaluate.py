@@ -2,6 +2,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.utils.data import DataLoader
 
+from sample_hunter.pipeline.transformations.functional import flatten_sub_batches
 from sample_hunter.pipeline.triplet_loss import triplet_accuracy, mine_negative_triplet
 from sample_hunter._util import DEVICE
 from sample_hunter.cfg import config
@@ -20,16 +21,13 @@ def evaluate(
 
     sum_accuracy = 0.0
     num_batches = 0
-    for batch in dataloader:
-        positive = batch["positive"]
-        anchor = batch["anchor"]
-        song_ids = batch["song_ids"]
+    for anchor, positive, keys in flatten_sub_batches(dataloader):
 
         batch_accuracy = evaluate_batch(
             model=model,
             positive=positive,
             anchor=anchor,
-            song_ids=song_ids,
+            song_ids=keys,
             alpha=alpha,
             device=device,
         )
