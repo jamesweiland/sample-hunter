@@ -3,10 +3,27 @@ from typing import Dict, List, Tuple, Generator
 from torch import Tensor
 import torch
 
+from sample_hunter.cfg import config
+
+
+def flatten_sub_batches(
+    dataloader: torch.utils.data.DataLoader,
+) -> Generator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], None, None]:
+    """
+    A generator to wrap around a torch dataloader with a collate function that
+    returns a list of tensors. This yields the tensors in the list, one at a time.
+    This expects the dataloader to yield a list of tuples
+    """
+    for batch in dataloader:
+        for sub_batch in batch:
+            yield sub_batch
+
 
 def collate_spectrograms(
-    batch: List[Dict[str, Tensor]], col: str | List[str]
-) -> Tensor | Tuple[Tensor, ...]:
+    batch: List[Dict[str, Tensor]],
+    col: str | List[str],
+    sub_batch_size: int = config.network.sub_batch_size,
+) -> Tuple[torch.Tensor] | List[Tuple[torch.Tensor, ...]]:
     """
     Collate a batch of mappings of transformed tensors before passing to the dataloader.
 
@@ -15,12 +32,21 @@ def collate_spectrograms(
     """
 
     if isinstance(col, str):
-        return torch.cat([example[col] for example in batch], dim=0)
+        full_tensor = torch.cat([example[col] for example in batch], dim=0)
+        perm = torch.randperm(full_tensor.shape[0])
+        shuffled = full_tensor[perm]
+
+        sub_batches = shuffled.split(sub_batch_size)
     else:
-        to_return = [
+        full_tensors = [
             torch.cat([example[name] for example in batch], dim=0) for name in col
         ]
-        return tuple(to_return)
+        perm = torch.randperm(full_tensors[0].shape[0])
+        shuffled = [t[perm] for t in full_tensors]
+
+        sub_batches = (t.split(sub_batch_size) for t in shuffled)
+
+    return list(zip(*sub_batches))
 
 
 def resize(signal: Tensor, desired_length: int) -> Tensor:

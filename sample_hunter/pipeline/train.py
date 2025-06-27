@@ -12,7 +12,7 @@ import webdataset as wds
 
 
 from .encoder_net import EncoderNet
-from .transformations.functional import collate_spectrograms
+from .transformations.functional import collate_spectrograms, flatten_sub_batches
 from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
 from .triplet_loss import triplet_accuracy, mine_negative_triplet
 from .evaluate import evaluate
@@ -39,10 +39,9 @@ def train_single_epoch(
     epoch_total_loss = 0
     num_batches = 0
     epoch_total_accuracy = 0
-    for anchor, positive, keys in tqdm(dataloader, desc="Training epoch..."):
-        print(anchor.shape)
-        print(positive.shape)
-        print(keys.shape)
+    for anchor, positive, keys in tqdm(
+        flatten_sub_batches(dataloader), desc="Training epoch..."
+    ):
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
@@ -274,8 +273,16 @@ if __name__ == "__main__":
             keys = torch.tensor([int(song["__key__"]) for song in songs])
             windows_per_song = [song["anchor"].shape[0] for song in songs]
             keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
+            key_splits = keys.split(config.network.sub_batch_size)
 
-            return (*collate_spectrograms(songs, col=["anchor", "positive"]), keys)
+            specs = collate_spectrograms(songs, col=["anchor", "positive"])
+
+            assert len(specs) == len(key_splits)
+
+            return [
+                (anchor, positive, k)
+                for (anchor, positive), k in zip(specs, key_splits)
+            ]
 
         train_dataset = load_webdataset(config.hf.repo_id, "train", args.token).map(
             map_fn
@@ -283,7 +290,7 @@ if __name__ == "__main__":
 
         train_dataloader = DataLoader(
             train_dataset,
-            batch_size=config.network.batch_size,
+            batch_size=config.network.source_batch_size,
             collate_fn=collate_fn,
         )
 
@@ -292,7 +299,9 @@ if __name__ == "__main__":
         )
 
         test_dataloader = DataLoader(
-            test_dataset, batch_size=config.network.batch_size, collate_fn=collate_fn
+            test_dataset,
+            batch_size=config.network.source_batch_size,
+            collate_fn=collate_fn,
         )
 
         if args.num:
