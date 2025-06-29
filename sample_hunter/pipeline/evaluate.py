@@ -22,6 +22,9 @@ def evaluate(
     sum_accuracy = 0.0
     num_batches = 0
     for anchor, positive, keys in flatten_sub_batches(dataloader):
+        anchor = anchor.to(device)
+        positive = positive.to(device)
+        keys = keys.to(device)
 
         batch_accuracy = evaluate_batch(
             model=model,
