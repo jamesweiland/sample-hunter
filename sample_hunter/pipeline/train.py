@@ -340,7 +340,9 @@ if __name__ == "__main__":
             if not args.from_.exists():
                 raise ValueError(f"--from not found: {args.from_}")
 
-            model = torch.load(args.from_, weights_only=False).to(DEVICE)
+            state_dict = torch.load(args.from_, weights_only=False)
+            model = EncoderNet().to(DEVICE)
+            model.load_state_dict(state_dict)
             num_epochs = range(1, config.network.num_epochs + 1)
         else:
             # make a new model
