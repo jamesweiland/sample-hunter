@@ -332,7 +332,9 @@ if __name__ == "__main__":
                     f"Config num_epochs: {config.network.num_epochs}"
                 )
 
-            model = torch.load(args.from_, weights_only=False).to(DEVICE)
+            state_dict = torch.load(args.from_, weights_only=False)
+            model = EncoderNet().to(DEVICE)
+            model.load_state_dict(state_dict)
             num_epochs = range(
                 epochs_already_trained + 1, config.network.num_epochs + 1
             )
