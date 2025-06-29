@@ -324,7 +324,7 @@ if __name__ == "__main__":
                     "The stem must follow the format: <stem_name>-<epoch>"
                 )
 
-            epochs_already_trained = int(str(args.from_).split("-")[-1])
+            epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
             if epochs_already_trained >= config.network.num_epochs:
                 raise ValueError(
                     "The model has already been trained for more epochs than specified in the config for num_epochs\n"
