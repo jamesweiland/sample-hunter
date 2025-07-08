@@ -14,7 +14,7 @@ from sample_hunter.pipeline.data_loading import load_webdataset
 
 
 from .encoder_net import EncoderNet
-from .transformations.functional import collate_spectrograms, flatten_sub_batches
+from .data_loading import collate_spectrograms, flatten_sub_batches
 from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
 from .triplet_loss import triplet_accuracy, mine_negative_triplet
 from .evaluate import evaluate

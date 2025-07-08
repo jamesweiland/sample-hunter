@@ -2,8 +2,8 @@ import torch.nn as nn
 from torch import Tensor
 from torch.utils.data import DataLoader
 
-from sample_hunter.pipeline.transformations.functional import flatten_sub_batches
-from sample_hunter.pipeline.triplet_loss import triplet_accuracy, mine_negative_triplet
+from .data_loading import flatten_sub_batches
+from .triplet_loss import triplet_accuracy, mine_negative_triplet
 from sample_hunter._util import DEVICE
 from sample_hunter.cfg import config
 
