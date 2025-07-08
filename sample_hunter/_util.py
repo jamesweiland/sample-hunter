@@ -7,7 +7,6 @@ import torch
 import torchaudio
 from typing import Any
 from abc import ABC, abstractmethod
-import sounddevice as sd
 
 import pandas as pd
 
@@ -49,21 +48,6 @@ DEFAULT_REQUEST_TIMEOUT: float = 15.0
 DEFAULT_DOWNLOAD_TIME: float = 2700.0
 DEFAULT_RETRIES: int = 5
 DEFAULT_RETRY_DELAY: float = 5.0
-
-
-def play_tensor_audio(tensor: torch.Tensor, sample_rate=config.preprocess.sample_rate):
-    """Halt script execution to play a tensor as audio"""
-    # tensor: shape (1, T) or (T,)
-    arr = tensor.cpu().numpy()
-    if arr.ndim == 2:
-        if arr.shape[0] == 2:  # stereo
-            arr = arr.T
-        elif arr.shape[0] == 1:  # mono
-            arr = arr.squeeze(0)  # sd doesn't like the extra dimension
-
-    print("Playing audio...")
-    sd.play(arr, samplerate=sample_rate)
-    sd.wait()  # Wait until playback is finished
 
 
 def save_to_json_or_csv(path: Path, df: pd.DataFrame) -> None:
