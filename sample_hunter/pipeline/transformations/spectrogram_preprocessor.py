@@ -8,9 +8,11 @@ import torch
 import torchaudio
 from typing import Dict, Tuple, Union
 
+
 from .obfuscator import Obfuscator
-from .functional import resize
+from .functional import resize, num_windows
 from sample_hunter._util import (
+    play_tensor_audio,
     DEVICE,
     MEL_SPECTROGRAM,
     STEP_NUM_SAMPLES,
@@ -64,6 +66,7 @@ class SpectrogramPreprocessor:
     def __call__(
         self,
         data: Union[Dict, torch.Tensor, bytes],
+        target_length: int | None = None,
         obfuscate: bool = False,
         sample_rate: int | None = None,
     ):
@@ -83,11 +86,7 @@ class SpectrogramPreprocessor:
                 ).to(self.device)
                 if signal.ndim == 1:
                     signal = signal.unsqueeze(0)
-                return self.transform(
-                    signal=signal,
-                    sample_rate=data["sampling_rate"],
-                    obfuscate=obfuscate,
-                )
+
             elif isinstance(data, bytes):
                 # try to read the bytes as an mp3 file
                 with io.BytesIO(data) as buffer:
@@ -96,21 +95,26 @@ class SpectrogramPreprocessor:
                     )
                     if signal.ndim == 1:
                         signal = signal.unsqueeze(0)
-                    return self.transform(
-                        signal=signal, sample_rate=sample_rate, obfuscate=obfuscate
-                    )
             elif isinstance(data, torch.Tensor):
                 # if a tensor is passed, a sample_rate has to be passed too
                 assert sample_rate is not None
-                data = data.to(self.device)
-                return self.transform(
-                    signal=data, sample_rate=sample_rate, obfuscate=obfuscate
-                )
+                signal = data.to(self.device)
             else:
                 raise RuntimeError("Unsupported data type")
 
+            return self.transform(
+                signal=signal,
+                sample_rate=sample_rate,  # type: ignore
+                obfuscate=obfuscate,
+                target_length=target_length,
+            )
+
     def transform(
-        self, signal: torch.Tensor, sample_rate: int, obfuscate: bool
+        self,
+        signal: torch.Tensor,
+        sample_rate: int,
+        obfuscate: bool,
+        target_length: int | None = None,
     ) -> Tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """
         Perform the necessary pre-processing
@@ -128,7 +132,7 @@ class SpectrogramPreprocessor:
         # resample to target sampling rate
         signal = self.resample(signal, sample_rate)
         # make windows with overlay
-        signal = self.create_windows(signal)
+        signal = self.create_windows(signal, target_length=target_length)
 
         anchor = self.mel_spectrogram(signal)
         if obfuscate:
@@ -177,30 +181,63 @@ class SpectrogramPreprocessor:
             torch.set_num_threads(torch.multiprocessing.cpu_count())
         return signal
 
-    def create_windows(self, signal: torch.Tensor) -> torch.Tensor:
-        # handle signals shorter than window size
-        if signal.size(1) < self.window_num_samples:
-            num_missing_samples = self.window_num_samples - signal.size(1)
-            signal = torch.nn.functional.pad(signal, (0, num_missing_samples))
-            return signal.unsqueeze(0)
+    def create_windows(
+        self, signal: torch.Tensor, target_length: int | None = None
+    ) -> torch.Tensor:
 
-        windows = signal.unfold(
-            dimension=1, size=self.window_num_samples, step=self.step_num_samples
-        )
+        if target_length is None:
+            # Default behavior
 
-        # calculate remaining samples after last full window
-        signal_length = signal.size(1)
-        num_windows = windows.size(1)
-        remaining_samples = signal_length - (
-            (num_windows - 1) * self.step_num_samples + self.window_num_samples
-        )
+            # handle signals shorter than window size
+            if signal.size(1) < self.window_num_samples:
+                num_missing_samples = self.window_num_samples - signal.size(1)
+                signal = torch.nn.functional.pad(signal, (0, num_missing_samples))
+                return signal.unsqueeze(0)
 
-        # pad the last window if necessary
-        if remaining_samples > 0:
-            last_segment = signal[
-                :, (num_windows - 1) * self.step_num_samples + self.window_num_samples :
-            ]
-            last_segment = resize(last_segment, self.window_num_samples).unsqueeze(1)
-            windows = torch.cat([windows, last_segment], dim=1)
+            windows = signal.unfold(
+                dimension=1, size=self.window_num_samples, step=self.step_num_samples
+            )
 
-        return windows.transpose(0, 1).to(self.device)
+            # calculate remaining samples after last full window
+            signal_length = signal.size(1)
+            n_windows = windows.size(1)
+            remaining_samples = signal_length - (
+                (n_windows - 1) * self.step_num_samples + self.window_num_samples
+            )
+
+            # pad the last window if necessary
+            if remaining_samples > 0:
+                last_segment = signal[
+                    :,
+                    (n_windows - 1) * self.step_num_samples + self.window_num_samples :,
+                ]
+                last_segment = resize(last_segment, self.window_num_samples).unsqueeze(
+                    1
+                )
+                windows = torch.cat([windows, last_segment], dim=1)
+
+            return windows.transpose(0, 1).to(self.device)
+
+        # if n_windows is specified, do per-window padding to reach the target length
+
+        proportion = signal.shape[1] / target_length
+        n_windows = num_windows(target_length)
+        windows = []
+        start = 0
+        for _ in range(n_windows - 1):
+            # use floating point representation to calculate end
+            end = start + self.window_num_samples * proportion
+            window = signal[:, int(start) : int(end)]
+            if window.shape[1] != self.window_num_samples:
+                window = resize(window, self.window_num_samples)
+            windows.append(window)
+            start += self.step_num_samples * proportion
+
+        # do the last window separately, because it has to get
+        # all the remaining samples no matter what
+        window = signal[:, int(start) :]
+        if window.shape[1] != self.window_num_samples:
+            window = resize(window, self.window_num_samples)
+        windows.append(window)
+
+        return torch.stack(windows, dim=0)
