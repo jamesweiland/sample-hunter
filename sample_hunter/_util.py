@@ -74,6 +74,7 @@ def play_tensor_audio(tensor: torch.Tensor, sample_rate=config.preprocess.sample
         elif arr.shape[0] == 1:  # mono
             arr = arr.squeeze(0)  # sd doesn't like the extra dimension
 
+    print("Playing audio...")
     sd.play(arr, samplerate=sample_rate)
     sd.wait()  # Wait until playback is finished
 
