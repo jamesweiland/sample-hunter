@@ -1,18 +1,16 @@
-from huggingface_hub import HfApi
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
-from typing import Callable, List, Tuple
+from typing import Callable, Tuple
 import argparse
 from pathlib import Path
 from tqdm import tqdm
-import webdataset as wds
 
-
+from .data_loading import load_webdataset
 from .encoder_net import EncoderNet
-from .transformations.functional import collate_spectrograms, flatten_sub_batches
+from .data_loading import collate_spectrograms, flatten_sub_batches
 from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
 from .triplet_loss import triplet_accuracy, mine_negative_triplet
 from .evaluate import evaluate
@@ -182,30 +180,6 @@ def train(
     if tensorboard != "none":
         writer.close()  # type: ignore
     print("Finished training")
-
-
-def get_tar_files(repo_id: str, split: str, token: str) -> List[str]:
-    api = HfApi()
-
-    files = api.list_repo_files(repo_id, repo_type="dataset", token=token)
-    tar_files = [
-        file for file in files if file.startswith(f"{split}/") and file.endswith(".tar")
-    ]
-    return tar_files
-
-
-def load_webdataset(repo_id: str, split: str, token: str) -> wds.WebDataset:
-    tar_files = get_tar_files(repo_id, split, token)
-    # get all the numbers of the files
-    numbers = [int(name.split("-")[-1].split(".tar")[0]) for name in tar_files]
-    max_num = max(numbers)
-
-    max_num_str = f"{max_num:06d}"
-    pattern = f"{split}-{{000001..{max_num_str}}}.tar"
-
-    url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{split}/{pattern}"
-    pipe = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {token}'"
-    return wds.WebDataset(pipe, shardshuffle=True).shuffle(200).decode()
 
 
 def parse_args() -> argparse.Namespace:

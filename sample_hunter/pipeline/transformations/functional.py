@@ -1,62 +1,31 @@
-from typing import Dict, List, Tuple, Generator
+"""
+Utility functions used for transforming the audio into a trainable form
+"""
 
+from typing import Tuple, Generator
 from torch import Tensor
 import torch
 
-from sample_hunter.cfg import config
+from sample_hunter._util import STEP_NUM_SAMPLES, WINDOW_NUM_SAMPLES
 
 
-def flatten_sub_batches(
-    dataloader: torch.utils.data.DataLoader,
-) -> Generator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], None, None]:
-    """
-    A generator to wrap around a torch dataloader with a collate function that
-    returns a list of tensors. This yields the tensors in the list, one at a time.
-    This expects the dataloader to yield a list of tuples
-    """
-    dataloader_iter = iter(dataloader)
-    while True:
-        try:
-            batch = next(dataloader_iter)
-        except StopIteration:
-            break  # End of dataloader
-        except Exception as e:
-            print("An error occurred while fetching a batch from the dataloader")
-            print(str(e))
-            continue
-
-        for sub_batch in batch:
-            yield sub_batch
-
-
-def collate_spectrograms(
-    batch: List[Dict[str, Tensor]],
-    col: str | List[str],
-    sub_batch_size: int = config.network.sub_batch_size,
-) -> Tuple[torch.Tensor] | List[Tuple[torch.Tensor, ...]]:
-    """
-    Collate a batch of mappings of transformed tensors before passing to the dataloader.
-
-    This function expects tensors with shape (batch_size, num_windows, num_channels, n_mels, time_frames)
-    and returns a tensor with shape (new_batch_size, num_channels, n_mels, time_frames)
-    """
-
-    if isinstance(col, str):
-        full_tensor = torch.cat([example[col] for example in batch], dim=0)
-        perm = torch.randperm(full_tensor.shape[0])
-        shuffled = full_tensor[perm]
-
-        sub_batches = shuffled.split(sub_batch_size)
+def num_windows(
+    length: int,
+    window_size: int = WINDOW_NUM_SAMPLES,
+    step_size: int = STEP_NUM_SAMPLES,
+) -> int:
+    """Count the number of windows that a tensor with length would produce
+    for the given window and step size."""
+    if length < window_size:
+        return 1
+    # Number of full windows
+    base_windows = 1 + (length - window_size) // step_size
+    # Check for leftover samples after the last full window
+    remaining_samples = length - ((base_windows - 1) * step_size + window_size)
+    if remaining_samples > 0:
+        return base_windows + 1
     else:
-        full_tensors = [
-            torch.cat([example[name] for example in batch], dim=0) for name in col
-        ]
-        perm = torch.randperm(full_tensors[0].shape[0])
-        shuffled = [t[perm] for t in full_tensors]
-
-        sub_batches = (t.split(sub_batch_size) for t in shuffled)
-
-    return list(zip(*sub_batches))
+        return base_windows
 
 
 def resize(signal: Tensor, desired_length: int) -> Tensor:
