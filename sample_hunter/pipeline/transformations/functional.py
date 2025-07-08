@@ -3,7 +3,27 @@ from typing import Dict, List, Tuple, Generator
 from torch import Tensor
 import torch
 
+from sample_hunter._util import STEP_NUM_SAMPLES, WINDOW_NUM_SAMPLES
 from sample_hunter.cfg import config
+
+
+def num_windows(
+    length: int,
+    window_size: int = WINDOW_NUM_SAMPLES,
+    step_size: int = STEP_NUM_SAMPLES,
+) -> int:
+    """Count the number of windows that a tensor with length would produce
+    for the given window and step size."""
+    if length < window_size:
+        return 1
+    # Number of full windows
+    base_windows = 1 + (length - window_size) // step_size
+    # Check for leftover samples after the last full window
+    remaining_samples = length - ((base_windows - 1) * step_size + window_size)
+    if remaining_samples > 0:
+        return base_windows + 1
+    else:
+        return base_windows
 
 
 def flatten_sub_batches(
