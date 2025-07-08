@@ -1,9 +1,9 @@
 import torch.nn as nn
-from torch import Tensor
+import torch
 from torch.utils.data import DataLoader
 
-from sample_hunter.pipeline.transformations.functional import flatten_sub_batches
-from sample_hunter.pipeline.triplet_loss import triplet_accuracy, mine_negative_triplet
+from .data_loading import flatten_sub_batches
+from .triplet_loss import triplet_accuracy, mine_negative_triplet
 from sample_hunter._util import DEVICE
 from sample_hunter.cfg import config
 
@@ -18,40 +18,41 @@ def evaluate(
     Evaluate on a test dataset and return the average
     accuracy for the dataset
     """
+    with torch.no_grad():
 
-    sum_accuracy = 0.0
-    num_batches = 0
-    for anchor, positive, keys in flatten_sub_batches(dataloader):
-        anchor = anchor.to(device)
-        positive = positive.to(device)
-        keys = keys.to(device)
+        sum_accuracy = 0.0
+        num_batches = 0
+        for anchor, positive, keys in flatten_sub_batches(dataloader):
+            anchor = anchor.to(device)
+            positive = positive.to(device)
+            keys = keys.to(device)
 
-        batch_accuracy = evaluate_batch(
-            model=model,
-            positive=positive,
-            anchor=anchor,
-            song_ids=keys,
-            alpha=alpha,
-            device=device,
-        )
-        sum_accuracy += batch_accuracy
-        num_batches += 1
+            batch_accuracy = evaluate_batch(
+                model=model,
+                positive=positive,
+                anchor=anchor,
+                song_ids=keys,
+                alpha=alpha,
+                device=device,
+            )
+            sum_accuracy += batch_accuracy
+            num_batches += 1
 
-    avg_accuracy = sum_accuracy / num_batches
-    print(f"Average test accuracy: {avg_accuracy}")
-    return avg_accuracy
+        avg_accuracy = sum_accuracy / num_batches
+        print(f"Average test accuracy: {avg_accuracy}")
+        return avg_accuracy
 
 
 def evaluate_batch(
     model: nn.Module,
-    positive: Tensor,
-    song_ids: Tensor,
-    anchor: Tensor,
+    positive: torch.Tensor,
+    song_ids: torch.Tensor,
+    anchor: torch.Tensor,
     alpha: float,
     device: str,
 ) -> float:
     """
-    Train a single batch of tensors, and return the average triplet accuracy of the batch
+    Evaluate a single batch of tensors, and return the average triplet accuracy of the batch
     """
 
     model.eval()
