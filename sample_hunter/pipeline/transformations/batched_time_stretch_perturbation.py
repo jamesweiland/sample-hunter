@@ -4,9 +4,7 @@ import torch.multiprocessing as mp
 import torchaudio
 
 from .functional import resize
-from sample_hunter._util import DEVICE, PROCS
-from sample_hunter.cfg import config
-
+from sample_hunter._util import config, DEVICE, PROCS
 
 __all__ = ["BatchedTimeStretchPerturbation"]
 

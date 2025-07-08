@@ -8,7 +8,7 @@ from huggingface_hub import HfApi
 import webdataset as wds
 import re
 
-from sample_hunter.cfg import config
+from sample_hunter._util import config
 
 
 def flatten_sub_batches(

@@ -1,0 +1,43 @@
+# config.yaml
+preprocess:
+  sample_rate: 44100 # 44.1 kHz
+  n_fft: 1024
+  hop_length: 512
+  n_mels: 64
+  step_length: 1.0 # seconds of overlay
+  spectrogram_width: 2.0 # seconds per spectrogram
+  obfuscator:
+    time_stretch_factors: [0.75, 1, 1.25, 1.5]
+    pitch_factors: [0.6, 0.8, 1, 1.2, 1.5]
+    lowpass_range: [2000, 3000]
+    highpass_range: [500, 1500]
+    whitenoise_range: [0.00, 0.1]
+    lowpass_frac: 0.5
+
+network:
+  stride: 1
+  padding: 1
+  pool_kernel_size: 2
+  conv_layer_dims:
+    - [1, 16]
+    - [16, 32]
+    - [32, 64]
+    - [64, 128]
+    - [128, 256]
+  num_branches: 4
+  divide_and_encode_hidden_dim: 192
+  embedding_dim: 96
+  source_batch_size: 100 # songs per batch
+  sub_batch_size: 1000 # the number of examples the cnn actually trains on at a time
+  learning_rate: 0.005
+  num_epochs: 10
+  alpha: 0.2
+  test_split: 0.25
+
+paths:
+  log_dir: "_data/logs"
+  cache_dir: "_data/cache"
+
+hf:
+  repo_id: "samplr/songs"
+  url: "https://huggingface.co/datasets/samplr/songs"
