@@ -14,8 +14,12 @@ import sounddevice as sd
 
 import pandas as pd
 
-from sample_hunter.cfg import config
+from sample_hunter.config import set_config_path, get_config
 
+
+CONFIG_PATH: Path = Path("configs/7_8_2025.yaml")
+set_config_path(CONFIG_PATH)
+config = get_config()
 
 WINDOW_NUM_SAMPLES: int = int(
     config.preprocess.sample_rate * config.preprocess.spectrogram_width

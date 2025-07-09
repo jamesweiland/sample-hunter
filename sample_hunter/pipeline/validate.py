@@ -11,8 +11,7 @@ from .encoder_net import EncoderNet
 from .evaluate import evaluate_batch
 from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
 from .data_loading import load_webdataset
-from sample_hunter.cfg import config
-from sample_hunter._util import DEVICE, HF_TOKEN
+from sample_hunter._util import config, DEVICE, HF_TOKEN
 
 
 def validate(

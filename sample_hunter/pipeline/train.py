@@ -15,10 +15,10 @@ from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
 from .triplet_loss import triplet_accuracy, mine_negative_triplet
 from .evaluate import evaluate
 from sample_hunter._util import (
+    config,
     DEVICE,
     HF_TOKEN,
 )
-from sample_hunter.cfg import config
 
 
 def train_single_epoch(
@@ -86,7 +86,7 @@ def train_single_epoch(
     epoch_average_loss = epoch_total_loss / num_batches
     print(f"Average loss of epoch: {epoch_average_loss}")
     epoch_average_accuracy = epoch_total_accuracy / num_batches
-    print(f"Epoch accuracy: {epoch_total_accuracy}")
+    print(f"Epoch accuracy: {epoch_average_accuracy}")
     return epoch_average_loss, epoch_average_accuracy
 
 
@@ -160,21 +160,20 @@ def train(
             writer.add_scalar("Training loss", loss, i)  # type: ignore
             writer.add_scalar("Training accuracy", accuracy, i)  # type: ignore
 
-        if test_dataloader is not None:
-            # evaluate accuracy as we go on the test set
-            accuracy = evaluate(
-                model=model, dataloader=test_dataloader, alpha=alpha, device=device
-            )
-            print("We made it past testing")
-            if tensorboard != "none":
-                writer.add_scalar("Testing accuracy", accuracy, i)  # type: ignore
-
         if save_per_epoch is not None and i != num_epochs.stop - 1:
             save_path = (
                 save_per_epoch.parent
                 / f"{save_per_epoch.stem}-{i}{save_per_epoch.suffix}"
             )
             torch.save(model.state_dict(), save_path)
+
+        if test_dataloader is not None:
+            # evaluate accuracy as we go on the test set
+            accuracy = evaluate(
+                model=model, dataloader=test_dataloader, alpha=alpha, device=device
+            )
+            if tensorboard != "none":
+                writer.add_scalar("Testing accuracy", accuracy, i)  # type: ignore
 
         print("--------------------------------------------")
     if tensorboard != "none":
@@ -289,10 +288,7 @@ if __name__ == "__main__":
                 raise ValueError("--continue was given with no model to load in")
             if not args.from_.exists():
                 raise ValueError(f"--from not found: {args.from_}")
-            if (
-                str(args.from_.stem).count("-") != 1
-                and not str(args.from_.stem).split("-")[-1].isdigit()
-            ):
+            if not str(args.from_.stem).isdigit():
                 raise ValueError(
                     f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
                     "The stem must follow the format: <stem_name>-<epoch>"
