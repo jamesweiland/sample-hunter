@@ -86,7 +86,7 @@ def train_single_epoch(
     epoch_average_loss = epoch_total_loss / num_batches
     print(f"Average loss of epoch: {epoch_average_loss}")
     epoch_average_accuracy = epoch_total_accuracy / num_batches
-    print(f"Epoch accuracy: {epoch_total_accuracy}")
+    print(f"Epoch accuracy: {epoch_average_accuracy}")
     return epoch_average_loss, epoch_average_accuracy
 
 
@@ -165,7 +165,6 @@ def train(
             accuracy = evaluate(
                 model=model, dataloader=test_dataloader, alpha=alpha, device=device
             )
-            print("We made it past testing")
             if tensorboard != "none":
                 writer.add_scalar("Testing accuracy", accuracy, i)  # type: ignore
 
