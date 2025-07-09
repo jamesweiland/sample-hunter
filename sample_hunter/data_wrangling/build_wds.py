@@ -47,7 +47,7 @@ def create_shards(
             if tar is not None:
                 tar.close()
             current_shard += 1
-            shard_path = out_dir / f"{name}-{current_shard:06d}.tar"
+            shard_path = out_dir / f"{name}-{current_shard:04d}.tar"
             tar = tarfile.open(shard_path, "w")
             current_shard_size = 0
 
