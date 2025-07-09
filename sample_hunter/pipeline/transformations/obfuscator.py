@@ -8,8 +8,7 @@ import torchaudio
 
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
-from sample_hunter._util import DEVICE
-from sample_hunter.cfg import config
+from sample_hunter._util import config, DEVICE
 
 
 class Obfuscator(BaseModel):

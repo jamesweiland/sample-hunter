@@ -15,10 +15,10 @@ from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
 from .triplet_loss import triplet_accuracy, mine_negative_triplet
 from .evaluate import evaluate
 from sample_hunter._util import (
+    config,
     DEVICE,
     HF_TOKEN,
 )
-from sample_hunter.cfg import config
 
 
 def train_single_epoch(

@@ -12,13 +12,12 @@ from typing import Dict, Tuple, Union
 from .obfuscator import Obfuscator
 from .functional import resize, num_windows
 from sample_hunter._util import (
-    play_tensor_audio,
+    config,
     DEVICE,
     MEL_SPECTROGRAM,
     STEP_NUM_SAMPLES,
     WINDOW_NUM_SAMPLES,
 )
-from sample_hunter.cfg import config
 
 
 class SpectrogramPreprocessor:

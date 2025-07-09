@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 from typing import List, Tuple
 
-from sample_hunter._util import INPUT_SHAPE
-from sample_hunter.cfg import config
+from sample_hunter._util import config, INPUT_SHAPE
 
 
 class EncoderNet(nn.Module):
