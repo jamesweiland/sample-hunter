@@ -2,13 +2,24 @@
 Utility functions for loading in the webdataset.
 """
 
+from collections.abc import Buffer
+import io
 import torch
 from typing import Dict, List, Tuple, Generator
 from huggingface_hub import HfApi
+import torchaudio
 import webdataset as wds
 import re
 
 from sample_hunter._util import config
+
+
+def load_tensor_from_bytes(initial_bytes: Buffer) -> Tuple[torch.Tensor, int]:
+    with io.BytesIO(initial_bytes) as buffer:
+        audio, sr = torchaudio.load(buffer, format="mp3", backend="ffmpeg")
+        if audio.ndim == 1:
+            audio = audio.unsqueeze(0)
+    return audio, sr
 
 
 def flatten_sub_batches(

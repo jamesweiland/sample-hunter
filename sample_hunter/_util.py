@@ -17,7 +17,7 @@ import pandas as pd
 from sample_hunter.config import set_config_path, get_config
 
 
-CONFIG_PATH: Path = Path("configs/7_8_2025.yaml")
+CONFIG_PATH: Path = Path("configs/7_9_2025.yaml")
 set_config_path(CONFIG_PATH)
 config = get_config()
 
@@ -68,7 +68,11 @@ def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
     plt.show()
 
 
-def play_tensor_audio(tensor: torch.Tensor, sample_rate=config.preprocess.sample_rate):
+def play_tensor_audio(
+    tensor: torch.Tensor,
+    message: str | None = None,
+    sample_rate=config.preprocess.sample_rate,
+):
     """Halt script execution to play a tensor as audio"""
     # tensor: shape (1, T) or (T,)
     arr = tensor.cpu().numpy()
@@ -78,7 +82,10 @@ def play_tensor_audio(tensor: torch.Tensor, sample_rate=config.preprocess.sample
         elif arr.shape[0] == 1:  # mono
             arr = arr.squeeze(0)  # sd doesn't like the extra dimension
 
-    print("Playing audio...")
+    if message:
+        print(message)
+    else:
+        print("Playing audio...")
     sd.play(arr, samplerate=sample_rate)
     sd.wait()  # Wait until playback is finished
 

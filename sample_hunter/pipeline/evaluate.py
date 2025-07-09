@@ -39,7 +39,7 @@ def evaluate(
 
         avg_accuracy = sum_accuracy / num_batches
         print(f"Average test accuracy: {avg_accuracy}")
-        return avg_accuracy
+        return avg_accuracy  # type: ignore
 
 
 def evaluate_batch(
@@ -49,7 +49,8 @@ def evaluate_batch(
     anchor: torch.Tensor,
     alpha: float,
     device: str,
-) -> float:
+    debug: bool = False,
+) -> float | torch.Tensor:
     """
     Evaluate a single batch of tensors, and return the average triplet accuracy of the batch
     """
@@ -67,9 +68,13 @@ def evaluate_batch(
         alpha=alpha,
     )
 
-    return triplet_accuracy(
+    res = triplet_accuracy(
         anchor=anchor_embeddings,
         positive=positive_embeddings,
         negative=negative_embeddings,
         alpha=alpha,
+        debug=debug,
     )
+    if debug:
+        print(f"Result shape: {res.shape}")  # type: ignore
+    return res

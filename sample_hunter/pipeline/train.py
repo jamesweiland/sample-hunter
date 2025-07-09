@@ -87,7 +87,7 @@ def train_single_epoch(
     print(f"Average loss of epoch: {epoch_average_loss}")
     epoch_average_accuracy = epoch_total_accuracy / num_batches
     print(f"Epoch accuracy: {epoch_average_accuracy}")
-    return epoch_average_loss, epoch_average_accuracy
+    return epoch_average_loss, epoch_average_accuracy  # type: ignore
 
 
 def train(

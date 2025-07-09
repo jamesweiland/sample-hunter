@@ -8,6 +8,8 @@ import torch
 import torchaudio
 from typing import Dict, Tuple, Union
 
+from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+
 
 from .obfuscator import Obfuscator
 from .functional import resize, num_windows
@@ -30,6 +32,7 @@ class SpectrogramPreprocessor:
         self,
         mel_spectrogram: torchaudio.transforms.MelSpectrogram = MEL_SPECTROGRAM,
         target_sample_rate: int = config.preprocess.sample_rate,
+        volume_threshold: int = config.preprocess.volume_threshold,
         window_num_samples: int = WINDOW_NUM_SAMPLES,
         step_num_samples: int = STEP_NUM_SAMPLES,
         obfuscator: Obfuscator = Obfuscator(),
@@ -52,6 +55,8 @@ class SpectrogramPreprocessor:
         self.step_num_samples = step_num_samples
         self.device = device
         self.obfuscator = obfuscator
+        self.vol_threshold = volume_threshold
+        self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB()
 
     def __enter__(self):
         """Set up the resources for the downstream classes"""
@@ -88,12 +93,7 @@ class SpectrogramPreprocessor:
 
             elif isinstance(data, bytes):
                 # try to read the bytes as an mp3 file
-                with io.BytesIO(data) as buffer:
-                    signal, sample_rate = torchaudio.load(
-                        buffer, format="mp3", backend="ffmpeg"
-                    )
-                    if signal.ndim == 1:
-                        signal = signal.unsqueeze(0)
+                signal, sample_rate = load_tensor_from_bytes(data)
             elif isinstance(data, torch.Tensor):
                 # if a tensor is passed, a sample_rate has to be passed too
                 assert sample_rate is not None
@@ -179,6 +179,14 @@ class SpectrogramPreprocessor:
             )
             torch.set_num_threads(torch.multiprocessing.cpu_count())
         return signal
+
+    def remove_low_volume_windows(self, signal: torch.Tensor) -> torch.Tensor:
+        signal_db = self.amplitude_to_db(signal)
+        mean_db_per_example = signal_db.mean(dim=(1, 2))
+        print(f"Max volume in signal: {torch.max(signal_db)}")
+        print(f"Min volume in signal: {torch.min(signal_db)}")
+        signals_above_threshold = mean_db_per_example > self.vol_threshold
+        return signal[signals_above_threshold]
 
     def create_windows(
         self, signal: torch.Tensor, target_length: int | None = None

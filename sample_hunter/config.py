@@ -26,6 +26,7 @@ class PreprocessConfig:
     step_length: int
     spectrogram_width: int
     obfuscator: ObfuscatorConfig
+    volume_threshold: int
 
 
 @dataclass
@@ -104,6 +105,7 @@ def load_config(config_path: Path) -> Config:
         step_length=cfg["preprocess"]["step_length"],
         spectrogram_width=cfg["preprocess"]["spectrogram_width"],
         obfuscator=obfuscator,
+        volume_threshold=cfg["preprocess"]["volume_threshold"],
     )
     network = NetworkConfig(
         stride=cfg["network"]["stride"],
