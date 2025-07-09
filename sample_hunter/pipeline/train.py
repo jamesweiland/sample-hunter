@@ -160,6 +160,13 @@ def train(
             writer.add_scalar("Training loss", loss, i)  # type: ignore
             writer.add_scalar("Training accuracy", accuracy, i)  # type: ignore
 
+        if save_per_epoch is not None and i != num_epochs.stop - 1:
+            save_path = (
+                save_per_epoch.parent
+                / f"{save_per_epoch.stem}-{i}{save_per_epoch.suffix}"
+            )
+            torch.save(model.state_dict(), save_path)
+
         if test_dataloader is not None:
             # evaluate accuracy as we go on the test set
             accuracy = evaluate(
@@ -167,13 +174,6 @@ def train(
             )
             if tensorboard != "none":
                 writer.add_scalar("Testing accuracy", accuracy, i)  # type: ignore
-
-        if save_per_epoch is not None and i != num_epochs.stop - 1:
-            save_path = (
-                save_per_epoch.parent
-                / f"{save_per_epoch.stem}-{i}{save_per_epoch.suffix}"
-            )
-            torch.save(model.state_dict(), save_path)
 
         print("--------------------------------------------")
     if tensorboard != "none":
@@ -288,7 +288,7 @@ if __name__ == "__main__":
                 raise ValueError("--continue was given with no model to load in")
             if not args.from_.exists():
                 raise ValueError(f"--from not found: {args.from_}")
-            if not str(args.from_.stem).isdigit():
+            if not str(args.from_.stem).split("-")[-1].isdigit():
                 raise ValueError(
                     f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
                     "The stem must follow the format: <stem_name>-<epoch>"
