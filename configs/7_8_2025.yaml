@@ -26,8 +26,6 @@ network:
     - [256, 512]
     - [512, 1024]
     - [1024, 2048]
-    - [2048, 4096]
-    - [4096, 8192]
   min_dims: [5, 5] # The tensor won't get pooled lower than these dimensions (h x w)
   num_branches: 4
   divide_and_encode_hidden_dim: 192
