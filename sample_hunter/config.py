@@ -34,6 +34,7 @@ class NetworkConfig:
     padding: int
     pool_kernel_size: int
     conv_layer_dims: List[Tuple[int, int]]
+    min_dims: Tuple[int, int]
     num_branches: int
     divide_and_encode_hidden_dim: int
     embedding_dim: int
@@ -109,6 +110,7 @@ def load_config(config_path: Path) -> Config:
         padding=cfg["network"]["padding"],
         pool_kernel_size=cfg["network"]["pool_kernel_size"],
         conv_layer_dims=[tuple(pair) for pair in cfg["network"]["conv_layer_dims"]],
+        min_dims=cfg["network"]["min_dims"],
         num_branches=cfg["network"]["num_branches"],
         divide_and_encode_hidden_dim=cfg["network"]["divide_and_encode_hidden_dim"],
         embedding_dim=cfg["network"]["embedding_dim"],

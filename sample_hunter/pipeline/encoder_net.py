@@ -10,6 +10,7 @@ class EncoderNet(nn.Module):
         self,
         input_shape: torch.Size = INPUT_SHAPE,
         conv_layer_dims: List[Tuple[int, int]] = config.network.conv_layer_dims,
+        minimum_dims: Tuple[int, int] = config.network.min_dims,
         stride: int = config.network.stride,
         padding: int = config.network.padding,
         pool_kernel_size: int = config.network.pool_kernel_size,
@@ -21,26 +22,44 @@ class EncoderNet(nn.Module):
 
         # set up the conv blocks
         self.conv_blocks = nn.ModuleList()
+        current_shape = input_shape
         for i, dims in enumerate(conv_layer_dims):
             in_ch, out_ch = dims
             kernel_size = (1, 3) if i % 2 == 0 else (3, 1)
-            block = nn.Sequential(
+
+            h_conv = self.conv_output_dim(
+                current_shape[1], kernel_size[0], stride, padding
+            )
+            w_conv = self.conv_output_dim(
+                current_shape[2], kernel_size[1], stride, padding
+            )
+            h_pool = self.pool_output_dim(h_conv, pool_kernel_size, pool_kernel_size)
+            w_pool = self.pool_output_dim(w_conv, pool_kernel_size, pool_kernel_size)
+
+            layers = [
                 nn.Conv2d(
-                    in_channels=in_ch,
-                    out_channels=out_ch,
+                    in_ch,
+                    out_ch,
                     kernel_size=kernel_size,
                     stride=stride,
                     padding=padding,
                 ),
                 nn.BatchNorm2d(out_ch),
                 nn.ELU(),
-                nn.MaxPool2d(kernel_size=pool_kernel_size),
-            )
+            ]
+
+            if h_pool > minimum_dims[0] and w_pool > minimum_dims[1]:
+                layers.append(nn.MaxPool2d(kernel_size=pool_kernel_size))
+                current_shape = (out_ch, h_pool, w_pool)
+            else:
+                current_shape = (out_ch, h_conv, w_conv)
+
+            block = nn.Sequential(*layers)
             self.conv_blocks.append(block)
 
         # flatten the tensor before passing it to the divide-and-encode block
         self.flatten = nn.Flatten()
-        h, w = self._calculate_conv_output_shape(input_shape)
+        _, h, w = current_shape
         conv_out_dim = conv_layer_dims[-1][1] * h * w
 
         # set up the divide and encode block
@@ -70,15 +89,11 @@ class EncoderNet(nn.Module):
 
         return out
 
-    def _calculate_conv_output_shape(self, input_shape: torch.Size):
-        """Make a dummy forward pass to the conv stack to calculate the shape of the
-        output tensor (the shape of the input to the divide and encode block)"""
-        with torch.no_grad():
-            dummy = torch.zeros(1, *input_shape)
-            for block in self.conv_blocks:
-                dummy = block(dummy)
-        _, _, h, w = dummy.shape
-        return h, w
+    def conv_output_dim(self, dim, kernel_size, stride, padding):
+        return (dim + 2 * padding - (kernel_size - 1) - 1) // stride + 1
+
+    def pool_output_dim(self, dim, kernel_size, stride):
+        return (dim - kernel_size) // stride + 1
 
 
 if __name__ == "__main__":
