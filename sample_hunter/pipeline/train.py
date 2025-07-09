@@ -288,10 +288,7 @@ if __name__ == "__main__":
                 raise ValueError("--continue was given with no model to load in")
             if not args.from_.exists():
                 raise ValueError(f"--from not found: {args.from_}")
-            if (
-                str(args.from_.stem).count("-") != 1
-                and not str(args.from_.stem).split("-")[-1].isdigit()
-            ):
+            if not str(args.from_.stem).isdigit():
                 raise ValueError(
                     f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
                     "The stem must follow the format: <stem_name>-<epoch>"
