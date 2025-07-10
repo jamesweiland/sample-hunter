@@ -12,6 +12,7 @@ import tarfile
 from sklearn.model_selection import train_test_split
 
 SHARD_SIZE = int(1e9)  # bytes
+SONG_COUNTER = 0
 
 
 def create_shards(
@@ -20,24 +21,24 @@ def create_shards(
     """
     Create tar shards
     """
+    global SONG_COUNTER
 
     current_shard = 0
     current_shard_size = 0
     tar = None
-    song_counter = 1
+
     for idx, row in df.iterrows():
         mp3_path = Path(row["path"])
         if not mp3_path.exists():
             warnings.warn(f"Could not find {mp3_path}")
             continue
 
-        base_name = f"{song_counter:04d}"
+        base_name = f"{SONG_COUNTER:04d}"
         new_mp3_name = f"{base_name}.mp3"
         json_name = f"{base_name}.json"
-        song_counter += 1
 
         json_bytes = json.dumps(
-            {"title": row["title"], "artist": row["song_artist"]}
+            {"title": row["title"], "artist": row["song_artist"], "id": SONG_COUNTER}
         ).encode("utf-8")
 
         mp3_size = mp3_path.stat().st_size
@@ -57,6 +58,7 @@ def create_shards(
         tar.addfile(json_info, fileobj=io.BytesIO(json_bytes))
 
         current_shard_size += mp3_size + json_size
+        SONG_COUNTER += 1
 
     if tar is not None:
         tar.close()
