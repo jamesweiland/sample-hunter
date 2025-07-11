@@ -16,9 +16,8 @@ import pandas as pd
 
 from sample_hunter.config import set_config_path, get_config
 
-
 CONFIG_PATH: Path = Path("configs/7_9_2025.yaml")
-set_config_path(CONFIG_PATH)
+set_config_path(Path(CONFIG_PATH))
 config = get_config()
 
 WINDOW_NUM_SAMPLES: int = int(
@@ -52,6 +51,20 @@ DEFAULT_REQUEST_TIMEOUT: float = 15.0
 DEFAULT_DOWNLOAD_TIME: float = 2700.0
 DEFAULT_RETRIES: int = 5
 DEFAULT_RETRY_DELAY: float = 5.0
+
+
+def load_model(model_path: Path):
+    from sample_hunter.pipeline.encoder_net import EncoderNet
+
+    if DEVICE == "cuda":
+        state_dict = torch.load(model_path, weights_only=False)
+    else:
+        state_dict = torch.load(
+            model_path, weights_only=False, map_location=torch.device("cpu")
+        )
+    model = EncoderNet().to(DEVICE)
+    model.load_state_dict(state_dict)
+    return model
 
 
 def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):

@@ -3,7 +3,6 @@ Custom generator functions to transform/pre-process data that is sitting
 in the huggingface dataset.
 """
 
-import io
 import torch
 import torchaudio
 from typing import Dict, Tuple, Union

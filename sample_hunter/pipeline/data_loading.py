@@ -4,14 +4,16 @@ Utility functions for loading in the webdataset.
 
 from collections.abc import Buffer
 import io
+from pathlib import Path
 import torch
 from typing import Dict, List, Tuple, Generator
 from huggingface_hub import HfApi
+from datasets import load_dataset, IterableDataset, IterableDatasetDict
 import torchaudio
 import webdataset as wds
 import re
 
-from sample_hunter._util import config
+from sample_hunter._util import HF_TOKEN, config
 
 
 def load_tensor_from_bytes(initial_bytes: Buffer) -> Tuple[torch.Tensor, int]:
@@ -24,7 +26,7 @@ def load_tensor_from_bytes(initial_bytes: Buffer) -> Tuple[torch.Tensor, int]:
 
 def flatten_sub_batches(
     dataloader: torch.utils.data.DataLoader,
-) -> Generator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], None, None]:
+) -> Generator[Tuple[torch.Tensor, ...], None, None]:
     """
     A generator to wrap around a torch dataloader with a collate function that
     returns a list of tensors. This yields the tensors in the list, one at a time.
@@ -49,7 +51,7 @@ def collate_spectrograms(
     batch: List[Dict[str, torch.Tensor]],
     col: str | List[str],
     sub_batch_size: int = config.network.sub_batch_size,
-) -> Tuple[torch.Tensor] | List[Tuple[torch.Tensor, ...]]:
+) -> Tuple[torch.Tensor, ...] | List[Tuple[torch.Tensor, ...]]:
     """
     Collate a batch of mappings of transformed tensors before passing to the dataloader.
 
@@ -63,6 +65,7 @@ def collate_spectrograms(
         shuffled = full_tensor[perm]
 
         sub_batches = shuffled.split(sub_batch_size)
+        return tuple(sub_batches)
     else:
         full_tensors = [
             torch.cat([example[name] for example in batch], dim=0) for name in col
@@ -72,7 +75,7 @@ def collate_spectrograms(
 
         sub_batches = (t.split(sub_batch_size) for t in shuffled)
 
-    return list(zip(*sub_batches))
+        return list(zip(*sub_batches))
 
 
 def get_tar_files(repo_id: str, split: str, token: str) -> List[str]:
@@ -98,9 +101,36 @@ def extract_numbers_and_padding(tar_files: List[str], split: str):
     return numbers, padding
 
 
-def load_webdataset(repo_id: str, split: str, token: str) -> wds.WebDataset:
+def load_webdataset(
+    repo_id: str,
+    split: str | List[str],
+    token: str = HF_TOKEN,
+    cache_dir: Path = config.paths.cache_dir,
+) -> wds.WebDataset | Dict[str, wds.WebDataset]:
     """load a webdataset of a split containing tarfiles like {split}-{i:0nd}.tar, where n is some
     arbitary 0 padding, for all i found in the split."""
+    if isinstance(split, str):
+        pipe = build_pipe(repo_id, split, token=token)
+        return (
+            wds.WebDataset(pipe, shardshuffle=True, cache_dir=cache_dir)
+            .shuffle(200)
+            .decode()
+        )
+    else:
+        # there are multiple splits, and we'll return a dict of datasets
+        datasets = {}
+        for s in split:
+            pipe = build_pipe(repo_id, s, token=token)
+            dataset = (
+                wds.WebDataset(pipe, shardshuffle=True, cache_dir=cache_dir)
+                .shuffle(200)
+                .decode()
+            )
+            datasets.update({s: dataset})
+        return datasets
+
+
+def build_pipe(repo_id: str, split: str, token: str = HF_TOKEN) -> str:
     tar_files = get_tar_files(repo_id, split, token)
     numbers, padding = extract_numbers_and_padding(tar_files, split)
     assert padding is not None
@@ -110,4 +140,5 @@ def load_webdataset(repo_id: str, split: str, token: str) -> wds.WebDataset:
 
     url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{split}/{pattern}"
     pipe = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {token}'"
-    return wds.WebDataset(pipe, shardshuffle=True).shuffle(200).decode()
+
+    return pipe

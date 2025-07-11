@@ -54,9 +54,10 @@ class Obfuscator(BaseModel):
     n_fft: int = config.preprocess.n_fft
     hop_length: int = config.preprocess.hop_length
 
-    @cached_property
-    def tone_gen(self) -> ToneGenerator:
-        return ToneGenerator(self.sample_rate)
+    # this is probably deprecated but i'm gonna keep it here just in case
+    # @cached_property
+    # def tone_gen(self) -> ToneGenerator:
+    #     return ToneGenerator(self.sample_rate)
 
     @cached_property
     def time_stretch_perturbation(self) -> BatchedTimeStretchPerturbation:
@@ -239,41 +240,42 @@ class Obfuscator(BaseModel):
 
 
 if __name__ == "__main__":
+    pass
     # listen to obfuscated vs original audio
-    from .spectrogram_preprocessor import SpectrogramPreprocessor
-    from sample_hunter.pipeline.data_loading import load_webdataset
-    from sample_hunter._util import HF_TOKEN, play_tensor_audio
-    from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+    # from .spectrogram_preprocessor import SpectrogramPreprocessor
+    # from sample_hunter.pipeline.data_loading import load_webdataset
+    # from sample_hunter._util import HF_TOKEN, play_tensor_audio
+    # from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
 
-    with SpectrogramPreprocessor() as preprocessor:
-        dataset = load_webdataset("samplr/songs", "train", HF_TOKEN)
+    # with SpectrogramPreprocessor() as preprocessor:
+    #     dataset = load_webdataset("samplr/songs", "train", HF_TOKEN)
 
-        def map_fn(ex):
-            # load the audio as tensor form so it can be passed to obfuscator
-            audio, sr = load_tensor_from_bytes(ex["mp3"])
-            audio = preprocessor.mix_channels(audio)
-            audio = preprocessor.resample(audio, sr)
-            audio = preprocessor.create_windows(audio)
-            print(f"Shape of audio before remove low volume: {audio.shape}")
-            audio = preprocessor.remove_low_volume_windows(audio)
-            print(f"Shape of audio after remove low volume: {audio.shape}")
-            positive = preprocessor.obfuscate_window(audio)
-            start = 1 * torch.rand(positive.shape[0])
-            positive = preprocessor.obfuscator.tone_gen.generate_sine_wave(
-                positive,
-                torch.randint(50, 1001, (positive.shape[0],)),
-                (10 - 1) * torch.rand(positive.shape[0]) + 1,
-                start,
-                torch.clamp(start + torch.rand(positive.shape[0]), max=1.0),
-            )
-            return {**ex, "anchor": audio, "positive": positive}
+    #     def map_fn(ex):
+    #         # load the audio as tensor form so it can be passed to obfuscator
+    #         audio, sr = load_tensor_from_bytes(ex["mp3"])
+    #         audio = preprocessor.mix_channels(audio)
+    #         audio = preprocessor.resample(audio, sr)
+    #         audio = preprocessor.create_windows(audio)
+    #         print(f"Shape of audio before remove low volume: {audio.shape}")
+    #         audio = preprocessor.remove_low_volume_windows(audio)
+    #         print(f"Shape of audio after remove low volume: {audio.shape}")
+    #         positive = preprocessor.obfuscate_window(audio)
+    #         start = 1 * torch.rand(positive.shape[0])
+    #         positive = preprocessor.obfuscator.tone_gen.generate_sine_wave(
+    #             positive,
+    #             torch.randint(50, 1001, (positive.shape[0],)),
+    #             (10 - 1) * torch.rand(positive.shape[0]) + 1,
+    #             start,
+    #             torch.clamp(start + torch.rand(positive.shape[0]), max=1.0),
+    #         )
+    #         return {**ex, "anchor": audio, "positive": positive}
 
-        dataset = dataset.map(map_fn)
-        for ex in dataset:
-            print(f"Song: {ex["json"]["title"]}\n")
+    #     dataset = dataset.map(map_fn)
+    #     for ex in dataset:
+    #         print(f"Song: {ex["json"]["title"]}\n")
 
-            for i in range(ex["anchor"].shape[0]):
-                play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
-                play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
+    #         for i in range(ex["anchor"].shape[0]):
+    #             play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
+    #             play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
 
-            print("--------------------------------------------------")
+    #         print("--------------------------------------------------")

@@ -1,7 +1,8 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence, Tuple
 import yaml
+
 
 _CONFIG_OBJ = None
 _CONFIG_PATH = None
