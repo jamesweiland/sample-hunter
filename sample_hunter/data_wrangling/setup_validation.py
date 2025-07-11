@@ -51,6 +51,8 @@ def create_validation_shards(
             "positive_duration": positive_duration,
             "ground": new_ground_name,
             "positive": new_positive_name,
+            "ground_id": row["sampled"],
+            "positive_id": row["sampling"],
         }
         metadata_bytes = json.dumps(metadata).encode("utf-8")
         mp3_size = ground_path.stat().st_size + positive_path.stat().st_size
@@ -81,5 +83,15 @@ if __name__ == "__main__":
     df = pd.read_csv("_data/relationships-7-7-2025.csv", dtype=str)
     df = df[(~df["ground"].isnull()) & (df["ground"] != "nan")]
     df = df[(~df["positive"].isnull()) & (df["positive"] != "nan")]
+
+    unique_sampling = df["sampling"].unique()
+    unique_sampled = df["sampled"].unique()
+
+    # Assign integer IDs: sampling gets 0...N-1, sampled gets N...N+M-1
+    sampling_id_map = {v: i for i, v in enumerate(unique_sampling)}
+    sampled_id_map = {v: i + len(unique_sampling) for i, v in enumerate(unique_sampled)}
+
+    df["sampling"] = df["sampling"].map(sampling_id_map)
+    df["sampled"] = df["sampled"].map(sampled_id_map)
 
     create_validation_shards(df, Path("_data/validation-shards"))
