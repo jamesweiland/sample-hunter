@@ -7,11 +7,10 @@ import torch.nn as nn
 import torchaudio
 import webdataset as wds
 
-from .encoder_net import EncoderNet
 from .evaluate import evaluate_batch
 from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
 from .data_loading import load_tensor_from_bytes, load_webdataset
-from sample_hunter._util import config, DEVICE, HF_TOKEN, play_tensor_audio
+from sample_hunter._util import config, DEVICE, HF_TOKEN, load_model, play_tensor_audio
 
 
 def validate(
@@ -176,14 +175,7 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    if DEVICE == "cuda":
-        state_dict = torch.load(args.model, weights_only=False)
-    else:
-        state_dict = torch.load(
-            args.model, weights_only=False, map_location=torch.device("cpu")
-        )
-    model = EncoderNet().to(DEVICE)
-    model.load_state_dict(state_dict)
+    model = load_model(args.model)
 
     dataset = load_webdataset(args.repo_id, "validation", args.token)
 
