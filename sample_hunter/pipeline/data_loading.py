@@ -50,6 +50,7 @@ def flatten_sub_batches(
 def collate_spectrograms(
     batch: List[Dict[str, torch.Tensor]],
     col: str | List[str],
+    shuffle: bool = True,
     sub_batch_size: int = config.network.sub_batch_size,
 ) -> Tuple[torch.Tensor, ...] | List[Tuple[torch.Tensor, ...]]:
     """
@@ -61,19 +62,26 @@ def collate_spectrograms(
 
     if isinstance(col, str):
         full_tensor = torch.cat([example[col] for example in batch], dim=0)
-        perm = torch.randperm(full_tensor.shape[0])
-        shuffled = full_tensor[perm]
 
-        sub_batches = shuffled.split(sub_batch_size)
+        if shuffle:
+            perm = torch.randperm(full_tensor.shape[0])
+            shuffled = full_tensor[perm]
+            sub_batches = shuffled.split(sub_batch_size)
+        else:
+            sub_batches = full_tensor.split(sub_batch_size)
+
         return tuple(sub_batches)
     else:
         full_tensors = [
             torch.cat([example[name] for example in batch], dim=0) for name in col
         ]
-        perm = torch.randperm(full_tensors[0].shape[0])
-        shuffled = [t[perm] for t in full_tensors]
 
-        sub_batches = (t.split(sub_batch_size) for t in shuffled)
+        if shuffle:
+            perm = torch.randperm(full_tensors[0].shape[0])
+            shuffled = [t[perm] for t in full_tensors]
+            sub_batches = (t.split(sub_batch_size) for t in shuffled)
+        else:
+            sub_batches = (t.split(sub_batch_size) for t in full_tensors)
 
         return list(zip(*sub_batches))
 
