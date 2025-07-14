@@ -9,7 +9,7 @@ import torchaudio
 from .tone_generator import ToneGenerator
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
-from sample_hunter._util import config, DEVICE
+from sample_hunter._util import config, DEVICE, plot_spectrogram
 
 
 class Obfuscator(BaseModel):
@@ -48,6 +48,16 @@ class Obfuscator(BaseModel):
     whitenoise_range: Tuple[float, float] = (
         config.preprocess.obfuscator.whitenoise_range
     )
+    num_tones_to_add: int = config.preprocess.obfuscator.num_tones_to_add
+    tone_gen_frequency_range: Tuple[int, int] = (
+        config.preprocess.obfuscator.tone_gen_frequency_range
+    )
+    tone_gen_amplitude_range: Tuple[float, float] = (
+        config.preprocess.obfuscator.tone_gen_amplitude_range
+    )
+    tone_gen_duration_range: Tuple[float, float] = (
+        config.preprocess.obfuscator.tone_gen_duration_range
+    )
     lowpass_frac: float = config.preprocess.obfuscator.lowpass_frac
     device: str = DEVICE
     sample_rate: int = config.preprocess.sample_rate
@@ -55,9 +65,9 @@ class Obfuscator(BaseModel):
     hop_length: int = config.preprocess.hop_length
 
     # this is probably deprecated but i'm gonna keep it here just in case
-    # @cached_property
-    # def tone_gen(self) -> ToneGenerator:
-    #     return ToneGenerator(self.sample_rate)
+    @cached_property
+    def tone_gen(self) -> ToneGenerator:
+        return ToneGenerator(self.sample_rate)
 
     @cached_property
     def time_stretch_perturbation(self) -> BatchedTimeStretchPerturbation:
@@ -118,6 +128,7 @@ class Obfuscator(BaseModel):
             batch = self.pitch_perturbation(batch)
             batch = self.apply_filter(batch)
             batch = self.add_noise(batch)
+            # batch = self.generate_tone(batch)
             return batch
 
     def apply_filter(self, signal: torch.Tensor) -> torch.Tensor:
@@ -233,49 +244,99 @@ class Obfuscator(BaseModel):
         """
         Use `ToneGenerator` to generate a tone and add it to `signal`
 
+        signal has shape (B, 1, S), S is number of samples and B is batch size
+
         This is likely deprecated as we have a model that was trained
         without it that's pretty good, but i'll keep it here just in case
         """
-        pass
+        tone_gens = [
+            self.tone_gen.generate_sine_wave,
+            self.tone_gen.generate_square_wave,
+            self.tone_gen.generate_triangle_wave,
+            self.tone_gen.generate_sawtooth_wave,
+        ]
+        num_waves = len(tone_gens)
+        for _ in range(self.num_tones_to_add):
+            perm = torch.randperm(signal.shape[0])
+            # calculate the inverse permutation so we can restore the original order after
+            inv_perm = torch.empty_like(perm)
+            inv_perm[perm] = torch.arange(signal.shape[0])
+            signal = signal[perm]
+            segments = torch.chunk(signal, num_waves)
+            for i, segment in enumerate(segments):
+                frequencies = torch.randint(
+                    low=self.tone_gen_frequency_range[0],
+                    high=self.tone_gen_frequency_range[1],
+                    size=(segment.shape[0],),
+                )
+                amplitudes = (
+                    self.tone_gen_amplitude_range[1] - self.tone_gen_amplitude_range[0]
+                ) * torch.rand(segment.shape[0]) + self.tone_gen_amplitude_range[0]
+                starts = config.preprocess.spectrogram_width * torch.rand(
+                    segment.shape[0]
+                )
+                ends = torch.clamp(
+                    starts
+                    + (
+                        self.tone_gen_duration_range[1]
+                        - self.tone_gen_duration_range[0]
+                    )
+                    * torch.rand(segment.shape[0])
+                    + self.tone_gen_duration_range[0],
+                    max=config.preprocess.spectrogram_width,
+                )
+                segment = tone_gens[i](
+                    signal=segment,
+                    frequencies=frequencies,
+                    amplitudes=amplitudes,
+                    starts=starts,
+                    ends=ends,
+                )
+                signal[
+                    sum(seg.shape[0] for seg in segments[:i]) : sum(
+                        seg.shape[0] for seg in segments[: i + 1]
+                    )
+                ] = segment
+
+            signal = signal[inv_perm]
+
+        return signal
 
 
 if __name__ == "__main__":
     pass
     # listen to obfuscated vs original audio
-    # from .spectrogram_preprocessor import SpectrogramPreprocessor
-    # from sample_hunter.pipeline.data_loading import load_webdataset
-    # from sample_hunter._util import HF_TOKEN, play_tensor_audio
-    # from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+    from .spectrogram_preprocessor import SpectrogramPreprocessor
+    from sample_hunter.pipeline.data_loading import load_webdataset
+    from sample_hunter._util import HF_TOKEN, play_tensor_audio
+    from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
 
-    # with SpectrogramPreprocessor() as preprocessor:
-    #     dataset = load_webdataset("samplr/songs", "train", HF_TOKEN)
+    with SpectrogramPreprocessor() as preprocessor:
+        dataset = load_webdataset("samplr/songs", "train", HF_TOKEN)
 
-    #     def map_fn(ex):
-    #         # load the audio as tensor form so it can be passed to obfuscator
-    #         audio, sr = load_tensor_from_bytes(ex["mp3"])
-    #         audio = preprocessor.mix_channels(audio)
-    #         audio = preprocessor.resample(audio, sr)
-    #         audio = preprocessor.create_windows(audio)
-    #         print(f"Shape of audio before remove low volume: {audio.shape}")
-    #         audio = preprocessor.remove_low_volume_windows(audio)
-    #         print(f"Shape of audio after remove low volume: {audio.shape}")
-    #         positive = preprocessor.obfuscate_window(audio)
-    #         start = 1 * torch.rand(positive.shape[0])
-    #         positive = preprocessor.obfuscator.tone_gen.generate_sine_wave(
-    #             positive,
-    #             torch.randint(50, 1001, (positive.shape[0],)),
-    #             (10 - 1) * torch.rand(positive.shape[0]) + 1,
-    #             start,
-    #             torch.clamp(start + torch.rand(positive.shape[0]), max=1.0),
-    #         )
-    #         return {**ex, "anchor": audio, "positive": positive}
+        def map_fn(ex):
+            # load the audio as tensor form so it can be passed to obfuscator
+            audio, sr = load_tensor_from_bytes(ex["mp3"])
+            audio = preprocessor.mix_channels(audio)
+            audio = preprocessor.resample(audio, sr)
+            anchor = preprocessor.create_windows(audio)
+            positive = preprocessor.obfuscate_window(anchor)
+            return {
+                **ex,
+                "anchor": anchor,
+                "positive": positive,
+                "anchor_spec": preprocessor.mel_spectrogram(anchor),
+                "positive_spec": preprocessor.mel_spectrogram(positive),
+            }
 
-    #     dataset = dataset.map(map_fn)
-    #     for ex in dataset:
-    #         print(f"Song: {ex["json"]["title"]}\n")
+        dataset = dataset.map(map_fn)
+        for ex in dataset:
+            print(f"Song: {ex["json"]["title"]}\n")
 
-    #         for i in range(ex["anchor"].shape[0]):
-    #             play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
-    #             play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
+            for i in range(ex["anchor"].shape[0]):
+                play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
+                play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
+                plot_spectrogram(ex["anchor_spec"][i], f"anchor {i}")
+                plot_spectrogram(ex["positive_spec"][i], f"positive {i}")
 
-    #         print("--------------------------------------------------")
+            print("--------------------------------------------------")

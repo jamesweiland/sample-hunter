@@ -97,68 +97,74 @@ class EncoderNet(nn.Module):
 
 
 if __name__ == "__main__":
-    from sample_hunter._util import WINDOW_NUM_SAMPLES, DEVICE
+    from sample_hunter._util import WINDOW_NUM_SAMPLES, DEVICE, INPUT_SHAPE
     from torchsummary import summary
 
-    n_f = 1 + WINDOW_NUM_SAMPLES // config.preprocess.hop_length
-    input_shape = torch.Size((config.preprocess.n_mels, n_f))
-
     model = EncoderNet(
-        input_shape=input_shape,
+        input_shape=INPUT_SHAPE,
     ).to(DEVICE)
 
-    summary(model=model, input_size=input_shape, device=DEVICE)
+    summary(model=model, input_size=INPUT_SHAPE, device=DEVICE)
 
     """
     
-    ----------------------------------------------------------------
+----------------------------------------------------------------
         Layer (type)               Output Shape         Param #
 ================================================================
-            Conv2d-1          [-1, 16, 66, 173]              64
-       BatchNorm2d-2          [-1, 16, 66, 173]              32
-               ELU-3          [-1, 16, 66, 173]               0
-         MaxPool2d-4           [-1, 16, 33, 86]               0
-            Conv2d-5           [-1, 32, 33, 88]           1,568
-       BatchNorm2d-6           [-1, 32, 33, 88]              64
-               ELU-7           [-1, 32, 33, 88]               0
-         MaxPool2d-8           [-1, 32, 16, 44]               0
-            Conv2d-9           [-1, 64, 18, 44]           6,208
-      BatchNorm2d-10           [-1, 64, 18, 44]             128
-              ELU-11           [-1, 64, 18, 44]               0
-        MaxPool2d-12            [-1, 64, 9, 22]               0
-           Conv2d-13           [-1, 128, 9, 24]          24,704
-      BatchNorm2d-14           [-1, 128, 9, 24]             256
-              ELU-15           [-1, 128, 9, 24]               0
-        MaxPool2d-16           [-1, 128, 4, 12]               0
-           Conv2d-17           [-1, 256, 6, 12]          98,560
-      BatchNorm2d-18           [-1, 256, 6, 12]             512
-              ELU-19           [-1, 256, 6, 12]               0
-        MaxPool2d-20            [-1, 256, 3, 6]               0
-          Flatten-21                 [-1, 4608]               0
-           Linear-22                  [-1, 192]         884,928
-              ELU-23                  [-1, 192]               0
-      BatchNorm1d-24                  [-1, 192]             384
-           Linear-25                   [-1, 24]           4,632
-           Linear-26                  [-1, 192]         884,928
-              ELU-27                  [-1, 192]               0
-      BatchNorm1d-28                  [-1, 192]             384
-           Linear-29                   [-1, 24]           4,632
-           Linear-30                  [-1, 192]         884,928
-              ELU-31                  [-1, 192]               0
-      BatchNorm1d-32                  [-1, 192]             384
-           Linear-33                   [-1, 24]           4,632
-           Linear-34                  [-1, 192]         884,928
-              ELU-35                  [-1, 192]               0
-      BatchNorm1d-36                  [-1, 192]             384
-           Linear-37                   [-1, 24]           4,632
+            Conv2d-1           [-1, 16, 66, 87]              64
+       BatchNorm2d-2           [-1, 16, 66, 87]              32
+               ELU-3           [-1, 16, 66, 87]               0
+         MaxPool2d-4           [-1, 16, 33, 43]               0
+            Conv2d-5           [-1, 32, 33, 45]           1,568
+       BatchNorm2d-6           [-1, 32, 33, 45]              64
+               ELU-7           [-1, 32, 33, 45]               0
+         MaxPool2d-8           [-1, 32, 16, 22]               0
+            Conv2d-9           [-1, 64, 18, 22]           6,208
+      BatchNorm2d-10           [-1, 64, 18, 22]             128
+              ELU-11           [-1, 64, 18, 22]               0
+        MaxPool2d-12            [-1, 64, 9, 11]               0
+           Conv2d-13           [-1, 128, 9, 13]          24,704
+      BatchNorm2d-14           [-1, 128, 9, 13]             256
+              ELU-15           [-1, 128, 9, 13]               0
+           Conv2d-16          [-1, 256, 11, 13]          98,560
+      BatchNorm2d-17          [-1, 256, 11, 13]             512
+              ELU-18          [-1, 256, 11, 13]               0
+           Conv2d-19          [-1, 384, 11, 15]         295,296
+      BatchNorm2d-20          [-1, 384, 11, 15]             768
+              ELU-21          [-1, 384, 11, 15]               0
+           Conv2d-22          [-1, 512, 13, 15]         590,336
+      BatchNorm2d-23          [-1, 512, 13, 15]           1,024
+              ELU-24          [-1, 512, 13, 15]               0
+        MaxPool2d-25            [-1, 512, 6, 7]               0
+           Conv2d-26            [-1, 768, 6, 9]       1,180,416
+      BatchNorm2d-27            [-1, 768, 6, 9]           1,536
+              ELU-28            [-1, 768, 6, 9]               0
+          Flatten-29                [-1, 41472]               0
+           Linear-30                  [-1, 200]       8,294,600
+              ELU-31                  [-1, 200]               0
+      BatchNorm1d-32                  [-1, 200]             400
+           Linear-33                   [-1, 32]           6,432
+           Linear-34                  [-1, 200]       8,294,600
+              ELU-35                  [-1, 200]               0
+      BatchNorm1d-36                  [-1, 200]             400
+           Linear-37                   [-1, 32]           6,432
+           Linear-38                  [-1, 200]       8,294,600
+              ELU-39                  [-1, 200]               0
+      BatchNorm1d-40                  [-1, 200]             400
+           Linear-41                   [-1, 32]           6,432
+           Linear-42                  [-1, 200]       8,294,600
+              ELU-43                  [-1, 200]               0
+      BatchNorm1d-44                  [-1, 200]             400
+           Linear-45                   [-1, 32]           6,432
 ================================================================
-Total params: 3,691,872
-Trainable params: 3,691,872
+Total params: 35,407,200
+Trainable params: 35,407,200
 Non-trainable params: 0
 ----------------------------------------------------------------
-Input size (MB): 0.04
-Forward/backward pass size (MB): 9.27
-Params size (MB): 14.08
-Estimated Total Size (MB): 23.40
+Input size (MB): 0.02
+Forward/backward pass size (MB): 10.44
+Params size (MB): 135.07
+Estimated Total Size (MB): 145.53
 ----------------------------------------------------------------
+
     """

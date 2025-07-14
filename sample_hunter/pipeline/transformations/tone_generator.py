@@ -27,6 +27,8 @@ class ToneGenerator:
         Add a unique sine wave to each example in the batch.
         frequencies, amplitudes, starts, ends: (batch_size,)
         signal: (batch_size, 1, time)
+
+        start and end are in seconds
         """
         new_signal = signal.clone()
         batch_size = signal.shape[0]
@@ -51,6 +53,8 @@ class ToneGenerator:
     ) -> torch.Tensor:
         """
         Add a unique square wave to each example in the batch.
+
+        start and end are in seconds
         """
         new_signal = signal.clone()
         batch_size = signal.shape[0]
@@ -77,6 +81,8 @@ class ToneGenerator:
     ) -> torch.Tensor:
         """
         Add a unique triangle wave to each example in the batch.
+
+        start and end are in seconds
         """
         new_signal = signal.clone()
         batch_size = signal.shape[0]
@@ -107,6 +113,8 @@ class ToneGenerator:
     ) -> torch.Tensor:
         """
         Add a unique sawtooth wave to each example in the batch.
+
+        start and end are in seconds
         """
         new_signal = signal.clone()
         batch_size = signal.shape[0]
