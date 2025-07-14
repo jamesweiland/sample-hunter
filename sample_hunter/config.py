@@ -16,6 +16,10 @@ class ObfuscatorConfig:
     highpass_range: Tuple[int, int]
     whitenoise_range: Tuple[float, float]
     lowpass_frac: float
+    num_tones_to_add: int
+    tone_gen_frequency_range: Tuple[int, int]
+    tone_gen_amplitude_range: Tuple[float, float]
+    tone_gen_duration_range: Tuple[float, float]
 
 
 @dataclass
@@ -97,6 +101,16 @@ def load_config(config_path: Path) -> Config:
         highpass_range=tuple(cfg["preprocess"]["obfuscator"]["highpass_range"]),
         whitenoise_range=tuple(cfg["preprocess"]["obfuscator"]["whitenoise_range"]),
         lowpass_frac=cfg["preprocess"]["obfuscator"]["lowpass_frac"],
+        num_tones_to_add=cfg["preprocess"]["obfuscator"]["num_tones_to_add"],
+        tone_gen_frequency_range=cfg["preprocess"]["obfuscator"][
+            "tone_gen_frequency_range"
+        ],
+        tone_gen_amplitude_range=cfg["preprocess"]["obfuscator"][
+            "tone_gen_amplitude_range"
+        ],
+        tone_gen_duration_range=cfg["preprocess"]["obfuscator"][
+            "tone_gen_duration_range"
+        ],
     )
     preprocess = PreprocessConfig(
         sample_rate=cfg["preprocess"]["sample_rate"],
