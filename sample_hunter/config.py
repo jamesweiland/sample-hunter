@@ -56,6 +56,7 @@ class NetworkConfig:
 class PathsConfig:
     log_dir: Path
     cache_dir: Path
+    musan: Path
 
 
 @dataclass
@@ -141,6 +142,7 @@ def load_config(config_path: Path) -> Config:
     paths = PathsConfig(
         log_dir=Path(cfg["paths"]["log_dir"]),
         cache_dir=Path(cfg["paths"]["cache_dir"]),
+        musan=Path(cfg["paths"]["musan"]),
     )
     hf = HuggingfaceConfig(
         repo_id=cfg["hf"]["repo_id"],

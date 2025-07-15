@@ -1,15 +1,20 @@
 from functools import cached_property
 import math
+import random
 import torch
 from pydantic import BaseModel, field_validator
 from typing import Sequence, Tuple
 
 import torchaudio
+import torchaudio.prototype
+import torchaudio.prototype.datasets
 
+from .my_musan import MyMusan
+from .functional import create_windows, mix_channels
 from .tone_generator import ToneGenerator
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
-from sample_hunter._util import config, DEVICE, plot_spectrogram
+from sample_hunter._util import WINDOW_NUM_SAMPLES, config, DEVICE, plot_spectrogram
 
 
 class Obfuscator(BaseModel):
@@ -63,6 +68,10 @@ class Obfuscator(BaseModel):
     sample_rate: int = config.preprocess.sample_rate
     n_fft: int = config.preprocess.n_fft
     hop_length: int = config.preprocess.hop_length
+
+    @cached_property
+    def musan(self) -> MyMusan:
+        return MyMusan(config.paths.musan, subset="music")
 
     # this is probably deprecated but i'm gonna keep it here just in case
     @cached_property
@@ -127,8 +136,9 @@ class Obfuscator(BaseModel):
             batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)
             batch = self.apply_filter(batch)
-            batch = self.add_noise(batch)
+            # batch = self.add_noise(batch)
             # batch = self.generate_tone(batch)
+            batch = self.overlay_musan(batch)
             return batch
 
     def apply_filter(self, signal: torch.Tensor) -> torch.Tensor:
@@ -302,9 +312,36 @@ class Obfuscator(BaseModel):
 
         return signal
 
+    def overlay_musan(self, signal: torch.Tensor) -> torch.Tensor:
+        """
+        Overlay random samples from the MUSAN dataset onto `signal`
+
+        `signal` is a tensor with shape (B, 1, S),
+        B is batch size,
+        S is number of samples
+
+        each example in `signal` will have a different song from
+        MUSAN overlaid
+        """
+
+        # build up a sample of songs from musan
+        n = signal.shape[0]
+        sample = torch.empty((0, 1, WINDOW_NUM_SAMPLES))
+        while sample.shape[0] < n:
+            idx = random.randint(0, len(self.musan) - 1)
+            sample = torch.cat([sample, self.musan[idx]], dim=0)
+        # in case that now sample has more than signal
+        sample = sample[:n]
+
+        noise_levels = self.whitenoise_range[0] + (
+            self.whitenoise_range[1] - self.whitenoise_range[0]
+        ) * torch.rand(signal.shape[0], device=signal.device, dtype=torch.float16)
+        return torchaudio.functional.add_noise(
+            waveform=signal, noise=sample, snr=noise_levels.unsqueeze(1)
+        )
+
 
 if __name__ == "__main__":
-    pass
     # listen to obfuscated vs original audio
     from .spectrogram_preprocessor import SpectrogramPreprocessor
     from sample_hunter.pipeline.data_loading import load_webdataset
@@ -317,10 +354,12 @@ if __name__ == "__main__":
         def map_fn(ex):
             # load the audio as tensor form so it can be passed to obfuscator
             audio, sr = load_tensor_from_bytes(ex["mp3"])
-            audio = preprocessor.mix_channels(audio)
+            audio = mix_channels(audio)
             audio = preprocessor.resample(audio, sr)
-            anchor = preprocessor.create_windows(audio)
+            anchor = create_windows(audio)
+
             positive = preprocessor.obfuscate_window(anchor)
+            positive = preprocessor.obfuscator.overlay_musan(positive)
             return {
                 **ex,
                 "anchor": anchor,
