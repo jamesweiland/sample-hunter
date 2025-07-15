@@ -5,16 +5,19 @@ import multiprocessing
 import threading
 import torch
 import torchaudio
+from torchaudio.transforms import AmplitudeToDB
+from torch import Tensor
+import matplotlib.pyplot as plt
 from typing import Any
 from abc import ABC, abstractmethod
+import sounddevice as sd
 
 import pandas as pd
 
 from sample_hunter.config import set_config_path, get_config
 
-
-CONFIG_PATH: Path = Path("configs/7_8_2025.yaml")
-set_config_path(CONFIG_PATH)
+CONFIG_PATH: Path = Path("configs/7_14_2025.yaml")
+set_config_path(Path(CONFIG_PATH))
 config = get_config()
 
 WINDOW_NUM_SAMPLES: int = int(
@@ -48,6 +51,56 @@ DEFAULT_REQUEST_TIMEOUT: float = 15.0
 DEFAULT_DOWNLOAD_TIME: float = 2700.0
 DEFAULT_RETRIES: int = 5
 DEFAULT_RETRY_DELAY: float = 5.0
+
+
+def load_model(model_path: Path):
+    from sample_hunter.pipeline.encoder_net import EncoderNet
+
+    if DEVICE == "cuda":
+        state_dict = torch.load(model_path, weights_only=False)
+    else:
+        state_dict = torch.load(
+            model_path, weights_only=False, map_location=torch.device("cpu")
+        )
+    model = EncoderNet().to(DEVICE)
+    model.load_state_dict(state_dict)
+    return model
+
+
+def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
+    """Plot a torch Tensor as a spectrogram"""
+    tensor = tensor.squeeze().cpu()
+    tensor = AmplitudeToDB()(tensor)
+
+    plt.figure(figsize=(12, 4))
+    plt.imshow(tensor.numpy(), aspect="auto", origin="lower", cmap="viridis")
+    plt.colorbar(format="%+2.0f dB")
+    plt.title(title)
+    plt.ylabel("Mel Frequency Bin")
+    plt.xlabel("Time Frame")
+    plt.show()
+
+
+def play_tensor_audio(
+    tensor: torch.Tensor,
+    message: str | None = None,
+    sample_rate=config.preprocess.sample_rate,
+):
+    """Halt script execution to play a tensor as audio"""
+    # tensor: shape (1, T) or (T,)
+    arr = tensor.cpu().numpy()
+    if arr.ndim == 2:
+        if arr.shape[0] == 2:  # stereo
+            arr = arr.T
+        elif arr.shape[0] == 1:  # mono
+            arr = arr.squeeze(0)  # sd doesn't like the extra dimension
+
+    if message:
+        print(message)
+    else:
+        print("Playing audio...")
+    sd.play(arr, samplerate=sample_rate)
+    sd.wait()  # Wait until playback is finished
 
 
 def save_to_json_or_csv(path: Path, df: pd.DataFrame) -> None:

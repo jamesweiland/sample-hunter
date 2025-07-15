@@ -18,6 +18,7 @@ from sample_hunter._util import (
     config,
     DEVICE,
     HF_TOKEN,
+    load_model,
 )
 
 
@@ -87,7 +88,7 @@ def train_single_epoch(
     print(f"Average loss of epoch: {epoch_average_loss}")
     epoch_average_accuracy = epoch_total_accuracy / num_batches
     print(f"Epoch accuracy: {epoch_average_accuracy}")
-    return epoch_average_loss, epoch_average_accuracy
+    return epoch_average_loss, epoch_average_accuracy  # type: ignore
 
 
 def train(
@@ -302,9 +303,7 @@ if __name__ == "__main__":
                     f"Config num_epochs: {config.network.num_epochs}"
                 )
 
-            state_dict = torch.load(args.from_, weights_only=False)
-            model = EncoderNet().to(DEVICE)
-            model.load_state_dict(state_dict)
+            model = load_model(args.from_)
             num_epochs = range(
                 epochs_already_trained + 1, config.network.num_epochs + 1
             )
@@ -312,9 +311,7 @@ if __name__ == "__main__":
             if not args.from_.exists():
                 raise ValueError(f"--from not found: {args.from_}")
 
-            state_dict = torch.load(args.from_, weights_only=False)
-            model = EncoderNet().to(DEVICE)
-            model.load_state_dict(state_dict)
+            model = load_model(args.from_)
             num_epochs = range(1, config.network.num_epochs + 1)
         else:
             # make a new model

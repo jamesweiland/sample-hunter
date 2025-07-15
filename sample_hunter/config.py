@@ -1,7 +1,8 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence, Tuple
 import yaml
+
 
 _CONFIG_OBJ = None
 _CONFIG_PATH = None
@@ -15,6 +16,10 @@ class ObfuscatorConfig:
     highpass_range: Tuple[int, int]
     whitenoise_range: Tuple[float, float]
     lowpass_frac: float
+    num_tones_to_add: int
+    tone_gen_frequency_range: Tuple[int, int]
+    tone_gen_amplitude_range: Tuple[float, float]
+    tone_gen_duration_range: Tuple[float, float]
 
 
 @dataclass
@@ -26,6 +31,7 @@ class PreprocessConfig:
     step_length: int
     spectrogram_width: int
     obfuscator: ObfuscatorConfig
+    volume_threshold: int
 
 
 @dataclass
@@ -50,6 +56,7 @@ class NetworkConfig:
 class PathsConfig:
     log_dir: Path
     cache_dir: Path
+    musan: Path
 
 
 @dataclass
@@ -95,6 +102,16 @@ def load_config(config_path: Path) -> Config:
         highpass_range=tuple(cfg["preprocess"]["obfuscator"]["highpass_range"]),
         whitenoise_range=tuple(cfg["preprocess"]["obfuscator"]["whitenoise_range"]),
         lowpass_frac=cfg["preprocess"]["obfuscator"]["lowpass_frac"],
+        num_tones_to_add=cfg["preprocess"]["obfuscator"]["num_tones_to_add"],
+        tone_gen_frequency_range=cfg["preprocess"]["obfuscator"][
+            "tone_gen_frequency_range"
+        ],
+        tone_gen_amplitude_range=cfg["preprocess"]["obfuscator"][
+            "tone_gen_amplitude_range"
+        ],
+        tone_gen_duration_range=cfg["preprocess"]["obfuscator"][
+            "tone_gen_duration_range"
+        ],
     )
     preprocess = PreprocessConfig(
         sample_rate=cfg["preprocess"]["sample_rate"],
@@ -104,6 +121,7 @@ def load_config(config_path: Path) -> Config:
         step_length=cfg["preprocess"]["step_length"],
         spectrogram_width=cfg["preprocess"]["spectrogram_width"],
         obfuscator=obfuscator,
+        volume_threshold=cfg["preprocess"]["volume_threshold"],
     )
     network = NetworkConfig(
         stride=cfg["network"]["stride"],
@@ -124,6 +142,7 @@ def load_config(config_path: Path) -> Config:
     paths = PathsConfig(
         log_dir=Path(cfg["paths"]["log_dir"]),
         cache_dir=Path(cfg["paths"]["cache_dir"]),
+        musan=Path(cfg["paths"]["musan"]),
     )
     hf = HuggingfaceConfig(
         repo_id=cfg["hf"]["repo_id"],

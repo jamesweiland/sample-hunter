@@ -1,14 +1,20 @@
 from functools import cached_property
 import math
+import random
 import torch
 from pydantic import BaseModel, field_validator
-from typing import List, Sequence, Tuple
+from typing import Sequence, Tuple
 
 import torchaudio
+import torchaudio.prototype
+import torchaudio.prototype.datasets
 
+from .my_musan import MyMusan
+from .functional import create_windows, mix_channels
+from .tone_generator import ToneGenerator
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
-from sample_hunter._util import config, DEVICE
+from sample_hunter._util import WINDOW_NUM_SAMPLES, config, DEVICE, plot_spectrogram
 
 
 class Obfuscator(BaseModel):
@@ -47,11 +53,30 @@ class Obfuscator(BaseModel):
     whitenoise_range: Tuple[float, float] = (
         config.preprocess.obfuscator.whitenoise_range
     )
+    num_tones_to_add: int = config.preprocess.obfuscator.num_tones_to_add
+    tone_gen_frequency_range: Tuple[int, int] = (
+        config.preprocess.obfuscator.tone_gen_frequency_range
+    )
+    tone_gen_amplitude_range: Tuple[float, float] = (
+        config.preprocess.obfuscator.tone_gen_amplitude_range
+    )
+    tone_gen_duration_range: Tuple[float, float] = (
+        config.preprocess.obfuscator.tone_gen_duration_range
+    )
     lowpass_frac: float = config.preprocess.obfuscator.lowpass_frac
     device: str = DEVICE
     sample_rate: int = config.preprocess.sample_rate
     n_fft: int = config.preprocess.n_fft
     hop_length: int = config.preprocess.hop_length
+
+    @cached_property
+    def musan(self) -> MyMusan:
+        return MyMusan(config.paths.musan, subset="music")
+
+    # this is probably deprecated but i'm gonna keep it here just in case
+    @cached_property
+    def tone_gen(self) -> ToneGenerator:
+        return ToneGenerator(self.sample_rate)
 
     @cached_property
     def time_stretch_perturbation(self) -> BatchedTimeStretchPerturbation:
@@ -111,7 +136,9 @@ class Obfuscator(BaseModel):
             batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)
             batch = self.apply_filter(batch)
-            batch = self.add_noise(batch)
+            # batch = self.add_noise(batch)
+            # batch = self.generate_tone(batch)
+            batch = self.overlay_musan(batch)
             return batch
 
     def apply_filter(self, signal: torch.Tensor) -> torch.Tensor:
@@ -211,7 +238,7 @@ class Obfuscator(BaseModel):
         return output.reshape(signal.shape)
 
     def add_noise(self, signal: torch.Tensor) -> torch.Tensor:
-        """Add either white or pink noise to `signal`."""
+        """Apply a random amount of noise to `signal`."""
         noise = torch.randn_like(signal, device=signal.device, dtype=signal.dtype)
         noise_levels = self.whitenoise_range[0] + (
             self.whitenoise_range[1] - self.whitenoise_range[0]
@@ -219,3 +246,136 @@ class Obfuscator(BaseModel):
         return torchaudio.functional.add_noise(
             waveform=signal, noise=noise, snr=noise_levels.unsqueeze(1)
         )
+
+    def generate_tone(
+        self,
+        signal: torch.Tensor,
+    ):
+        """
+        Use `ToneGenerator` to generate a tone and add it to `signal`
+
+        signal has shape (B, 1, S), S is number of samples and B is batch size
+
+        This is likely deprecated as we have a model that was trained
+        without it that's pretty good, but i'll keep it here just in case
+        """
+        tone_gens = [
+            self.tone_gen.generate_sine_wave,
+            self.tone_gen.generate_square_wave,
+            self.tone_gen.generate_triangle_wave,
+            self.tone_gen.generate_sawtooth_wave,
+        ]
+        num_waves = len(tone_gens)
+        for _ in range(self.num_tones_to_add):
+            perm = torch.randperm(signal.shape[0])
+            # calculate the inverse permutation so we can restore the original order after
+            inv_perm = torch.empty_like(perm)
+            inv_perm[perm] = torch.arange(signal.shape[0])
+            signal = signal[perm]
+            segments = torch.chunk(signal, num_waves)
+            for i, segment in enumerate(segments):
+                frequencies = torch.randint(
+                    low=self.tone_gen_frequency_range[0],
+                    high=self.tone_gen_frequency_range[1],
+                    size=(segment.shape[0],),
+                )
+                amplitudes = (
+                    self.tone_gen_amplitude_range[1] - self.tone_gen_amplitude_range[0]
+                ) * torch.rand(segment.shape[0]) + self.tone_gen_amplitude_range[0]
+                starts = config.preprocess.spectrogram_width * torch.rand(
+                    segment.shape[0]
+                )
+                ends = torch.clamp(
+                    starts
+                    + (
+                        self.tone_gen_duration_range[1]
+                        - self.tone_gen_duration_range[0]
+                    )
+                    * torch.rand(segment.shape[0])
+                    + self.tone_gen_duration_range[0],
+                    max=config.preprocess.spectrogram_width,
+                )
+                segment = tone_gens[i](
+                    signal=segment,
+                    frequencies=frequencies,
+                    amplitudes=amplitudes,
+                    starts=starts,
+                    ends=ends,
+                )
+                signal[
+                    sum(seg.shape[0] for seg in segments[:i]) : sum(
+                        seg.shape[0] for seg in segments[: i + 1]
+                    )
+                ] = segment
+
+            signal = signal[inv_perm]
+
+        return signal
+
+    def overlay_musan(self, signal: torch.Tensor) -> torch.Tensor:
+        """
+        Overlay random samples from the MUSAN dataset onto `signal`
+
+        `signal` is a tensor with shape (B, 1, S),
+        B is batch size,
+        S is number of samples
+
+        each example in `signal` will have a different song from
+        MUSAN overlaid
+        """
+
+        # build up a sample of songs from musan
+        n = signal.shape[0]
+        sample = torch.empty((0, 1, WINDOW_NUM_SAMPLES))
+        while sample.shape[0] < n:
+            idx = random.randint(0, len(self.musan) - 1)
+            sample = torch.cat([sample, self.musan[idx]], dim=0)
+        # in case that now sample has more than signal
+        sample = sample[:n]
+
+        noise_levels = self.whitenoise_range[0] + (
+            self.whitenoise_range[1] - self.whitenoise_range[0]
+        ) * torch.rand(signal.shape[0], device=signal.device, dtype=torch.float16)
+        return torchaudio.functional.add_noise(
+            waveform=signal, noise=sample, snr=noise_levels.unsqueeze(1)
+        )
+
+
+if __name__ == "__main__":
+    # listen to obfuscated vs original audio
+    from .spectrogram_preprocessor import SpectrogramPreprocessor
+    from sample_hunter.pipeline.data_loading import load_webdataset
+    from sample_hunter._util import HF_TOKEN, play_tensor_audio
+    from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+
+    with SpectrogramPreprocessor() as preprocessor:
+        dataset = load_webdataset("samplr/songs", "train", HF_TOKEN)
+
+        def map_fn(ex):
+            # load the audio as tensor form so it can be passed to obfuscator
+            audio, sr = load_tensor_from_bytes(ex["mp3"])
+            audio = mix_channels(audio)
+            audio = preprocessor.resample(audio, sr)
+            anchor = create_windows(audio)
+
+            positive = preprocessor.obfuscate_window(anchor)
+            positive = preprocessor.obfuscator.overlay_musan(positive)
+            return {
+                **ex,
+                "anchor": anchor,
+                "positive": positive,
+                "anchor_spec": preprocessor.mel_spectrogram(anchor),
+                "positive_spec": preprocessor.mel_spectrogram(positive),
+            }
+
+        dataset = dataset.map(map_fn)
+        for ex in dataset:
+            print(f"Song: {ex["json"]["title"]}\n")
+
+            for i in range(ex["anchor"].shape[0]):
+                play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
+                play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
+                plot_spectrogram(ex["anchor_spec"][i], f"anchor {i}")
+                plot_spectrogram(ex["positive_spec"][i], f"positive {i}")
+
+            print("--------------------------------------------------")

@@ -7,11 +7,10 @@ import torch.nn as nn
 import torchaudio
 import webdataset as wds
 
-from .encoder_net import EncoderNet
 from .evaluate import evaluate_batch
 from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
-from .data_loading import load_webdataset
-from sample_hunter._util import config, DEVICE, HF_TOKEN
+from .data_loading import load_tensor_from_bytes, load_webdataset
+from sample_hunter._util import config, DEVICE, HF_TOKEN, load_model, play_tensor_audio
 
 
 def validate(
@@ -19,6 +18,7 @@ def validate(
     dataset: wds.WebDataset,
     alpha: float = config.network.alpha,
     device: str = DEVICE,
+    debug: bool = False,
 ) -> Tuple[float, int]:
     """
     Validate the model using a validation set. This is very similar to `sample_hunter.pipeline.evaluate.evaluate`, with the key difference
@@ -73,10 +73,12 @@ def validate(
                 anchors = batch["anchor_tensor"]
                 positives = batch["positive_tensor"]
 
-                keys = torch.tensor(int(batch["__key__"]))
-                windows_per_song = anchors.shape[0]
-                keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
-                return anchors, positives, keys
+                keys = [batch["json"]["title"]] * anchors.shape[0]
+
+                anchor_audio, anchor_sr = load_tensor_from_bytes(batch["a.mp3"])
+                positive_audio, positive_sr = load_tensor_from_bytes(batch["b.mp3"])
+
+                return anchors, positives, keys, anchor_audio, positive_audio
 
             dataset = dataset.map(map_fn)
 
@@ -87,14 +89,22 @@ def validate(
             all_anchors = []
             all_positives = []
             all_keys = []
-            for anchors, positives, keys in dataloader:
+            audio = {}
+            for anchors, positives, keys, anchor_audio, positive_audio in dataloader:
                 all_anchors.append(anchors.to(device))
                 all_positives.append(positives.to(device))
-                all_keys.append(keys.to(device))
+                all_keys.extend(keys)
+                key = keys[0]
+                audio[key] = (anchor_audio, positive_audio)
 
+            # one hot encode all_keys
+            unique_keys = sorted(set(all_keys))
+            key_to_index = {k: i for i, k in enumerate(unique_keys)}
+            all_keys = torch.tensor([key_to_index[k] for k in all_keys])
+
+            # properly collate anchors and positives
             all_anchors = torch.cat(all_anchors, dim=0)
             all_positives = torch.cat(all_positives, dim=0)
-            all_keys = torch.cat(all_keys, dim=0)
 
             assert (
                 all_anchors.shape == all_positives.shape
@@ -102,15 +112,30 @@ def validate(
             )
             batch_size = all_anchors.shape[0]
 
-            accuracy = evaluate_batch(
+            res = evaluate_batch(
                 model=model,
                 positive=all_positives,
                 song_ids=all_keys,
                 anchor=all_anchors,
                 alpha=alpha,
                 device=device,
+                debug=debug,
             )
-            return accuracy, batch_size
+
+            if debug:
+                for i in range(res.shape[0]):  # type: ignore
+                    if res[i] == False:  # type: ignore
+                        print(f"Example {i} failed")
+                        key = all_keys[i].item()
+                        print(f"Part of song {key}")
+                        play_tensor_audio(audio[key][0], message="Playing anchor...")
+                        play_tensor_audio(audio[key][1], message="Playing positive...")
+
+                accuracy = res.float().mean().item()  # type: ignore
+            else:
+                accuracy = res
+
+            return accuracy, batch_size  # type: ignore
 
 
 def parse_args() -> argparse.Namespace:
@@ -138,23 +163,22 @@ def parse_args() -> argparse.Namespace:
         default=HF_TOKEN,
     )
 
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Option to play all the samples that were incorrect",
+    )
+
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
 
-    if DEVICE == "cuda":
-        state_dict = torch.load(args.model, weights_only=False)
-    else:
-        state_dict = torch.load(
-            args.model, weights_only=False, map_location=torch.device("cpu")
-        )
-    model = EncoderNet().to(DEVICE)
-    model.load_state_dict(state_dict)
+    model = load_model(args.model)
 
     dataset = load_webdataset(args.repo_id, "validation", args.token)
 
-    accuracy, batch_size = validate(model, dataset)
+    accuracy, batch_size = validate(model, dataset, debug=args.debug)
     print(f"Average validation accuracy: {accuracy}")
     print(f"Batch size: {batch_size}")

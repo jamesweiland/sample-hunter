@@ -3,14 +3,15 @@ Custom generator functions to transform/pre-process data that is sitting
 in the huggingface dataset.
 """
 
-import io
 import torch
 import torchaudio
 from typing import Dict, Tuple, Union
 
+from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+
 
 from .obfuscator import Obfuscator
-from .functional import resize, num_windows
+from .functional import create_windows, mix_channels, resize, num_windows
 from sample_hunter._util import (
     config,
     DEVICE,
@@ -30,6 +31,7 @@ class SpectrogramPreprocessor:
         self,
         mel_spectrogram: torchaudio.transforms.MelSpectrogram = MEL_SPECTROGRAM,
         target_sample_rate: int = config.preprocess.sample_rate,
+        volume_threshold: int = config.preprocess.volume_threshold,
         window_num_samples: int = WINDOW_NUM_SAMPLES,
         step_num_samples: int = STEP_NUM_SAMPLES,
         obfuscator: Obfuscator = Obfuscator(),
@@ -52,6 +54,8 @@ class SpectrogramPreprocessor:
         self.step_num_samples = step_num_samples
         self.device = device
         self.obfuscator = obfuscator
+        self.vol_threshold = volume_threshold
+        self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB()
 
     def __enter__(self):
         """Set up the resources for the downstream classes"""
@@ -88,12 +92,7 @@ class SpectrogramPreprocessor:
 
             elif isinstance(data, bytes):
                 # try to read the bytes as an mp3 file
-                with io.BytesIO(data) as buffer:
-                    signal, sample_rate = torchaudio.load(
-                        buffer, format="mp3", backend="ffmpeg"
-                    )
-                    if signal.ndim == 1:
-                        signal = signal.unsqueeze(0)
+                signal, sample_rate = load_tensor_from_bytes(data)
             elif isinstance(data, torch.Tensor):
                 # if a tensor is passed, a sample_rate has to be passed too
                 assert sample_rate is not None
@@ -126,12 +125,17 @@ class SpectrogramPreprocessor:
         """
 
         # mix to mono
-        signal = self.mix_channels(signal)
+        signal = mix_channels(signal)
 
         # resample to target sampling rate
         signal = self.resample(signal, sample_rate)
         # make windows with overlay
-        signal = self.create_windows(signal, target_length=target_length)
+        signal = create_windows(
+            signal,
+            target_length=target_length,
+            window_num_samples=self.window_num_samples,
+            step_num_samples=self.step_num_samples,
+        )
 
         anchor = self.mel_spectrogram(signal)
         if obfuscate:
@@ -159,18 +163,6 @@ class SpectrogramPreprocessor:
         ob_sig = self.obfuscator(signal)
         return ob_sig
 
-    def mix_channels(self, signal: torch.Tensor) -> torch.Tensor:
-        """Mix the channels of the signal down to mono"""
-        if signal.ndim == 2:
-            channel_dim = 0
-        elif signal.ndim == 3:
-            channel_dim = 1
-        else:
-            raise ValueError(f"Unsupported tensor shape: {signal.shape}")
-        if signal.shape[channel_dim] != 1:
-            return torch.mean(signal, dim=0, keepdim=True)
-        return signal
-
     def resample(self, signal: torch.Tensor, sample_rate: int) -> torch.Tensor:
         if sample_rate != self.target_sample_rate:
             torch.set_num_threads(1)
@@ -180,63 +172,8 @@ class SpectrogramPreprocessor:
             torch.set_num_threads(torch.multiprocessing.cpu_count())
         return signal
 
-    def create_windows(
-        self, signal: torch.Tensor, target_length: int | None = None
-    ) -> torch.Tensor:
-
-        if target_length is None:
-            # Default behavior
-
-            # handle signals shorter than window size
-            if signal.size(1) < self.window_num_samples:
-                num_missing_samples = self.window_num_samples - signal.size(1)
-                signal = torch.nn.functional.pad(signal, (0, num_missing_samples))
-                return signal.unsqueeze(0)
-
-            windows = signal.unfold(
-                dimension=1, size=self.window_num_samples, step=self.step_num_samples
-            )
-
-            # calculate remaining samples after last full window
-            signal_length = signal.size(1)
-            n_windows = windows.size(1)
-            remaining_samples = signal_length - (
-                (n_windows - 1) * self.step_num_samples + self.window_num_samples
-            )
-
-            # pad the last window if necessary
-            if remaining_samples > 0:
-                last_segment = signal[
-                    :,
-                    (n_windows - 1) * self.step_num_samples + self.window_num_samples :,
-                ]
-                last_segment = resize(last_segment, self.window_num_samples).unsqueeze(
-                    1
-                )
-                windows = torch.cat([windows, last_segment], dim=1)
-
-            return windows.transpose(0, 1).to(self.device)
-
-        # if n_windows is specified, do per-window padding to reach the target length
-
-        proportion = signal.shape[1] / target_length
-        n_windows = num_windows(target_length)
-        windows = []
-        start = 0
-        for _ in range(n_windows - 1):
-            # use floating point representation to calculate end
-            end = start + self.window_num_samples * proportion
-            window = signal[:, int(start) : int(end)]
-            if window.shape[1] != self.window_num_samples:
-                window = resize(window, self.window_num_samples)
-            windows.append(window)
-            start += self.step_num_samples * proportion
-
-        # do the last window separately, because it has to get
-        # all the remaining samples no matter what
-        window = signal[:, int(start) :]
-        if window.shape[1] != self.window_num_samples:
-            window = resize(window, self.window_num_samples)
-        windows.append(window)
-
-        return torch.stack(windows, dim=0)
+    def remove_low_volume_windows(self, signal: torch.Tensor) -> torch.Tensor:
+        signal_db = self.amplitude_to_db(signal)
+        mean_db_per_example = signal_db.mean(dim=(1, 2))
+        signals_above_threshold = mean_db_per_example > self.vol_threshold
+        return signal[signals_above_threshold]

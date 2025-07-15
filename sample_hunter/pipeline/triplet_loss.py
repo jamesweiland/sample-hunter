@@ -4,28 +4,34 @@ Triplet loss functions to be used in training and evaluation
 
 import warnings
 import torch
-from torch import Tensor
 
 
 def triplet_accuracy(
-    anchor: Tensor, positive: Tensor, negative: Tensor, alpha: float
-) -> float:
+    anchor: torch.Tensor,
+    positive: torch.Tensor,
+    negative: torch.Tensor,
+    alpha: float,
+    debug: bool = False,
+) -> float | torch.Tensor:
     """Calculates the accuracy of the model by returning the ratio of positive embeddings
     closer to the anchor than negative ones. The positive embedding must be at least `alpha` closer
     to the anchor than the negative embedding"""
     pos_dists = torch.linalg.vector_norm(anchor - positive, ord=2, dim=1)
     neg_dists = torch.linalg.vector_norm(anchor - negative, ord=2, dim=1)
 
-    correct = pos_dists < neg_dists + alpha  # a boolean mask
-    return correct.float().mean().item()
+    correct = pos_dists < (neg_dists + alpha)  # a boolean mask
+    if debug:
+        return correct
+    else:
+        return correct.float().mean().item()
 
 
 def mine_negative_triplet(
-    anchor_embeddings: Tensor,
-    positive_embeddings: Tensor,
-    song_ids: Tensor,
+    anchor_embeddings: torch.Tensor,
+    positive_embeddings: torch.Tensor,
+    song_ids: torch.Tensor,
     alpha: float,
-) -> Tensor:
+) -> torch.Tensor:
     """
     Semi-hard online triplet mining implementation.
     Given an embedding and the batch it came from,
