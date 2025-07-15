@@ -51,8 +51,12 @@ def build_index(
                 keys = torch.tensor([int(song["json"]["ground_id"]) for song in batch])
                 windows_per_song = [song["specs"].shape[0] for song in batch]
                 keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
-                key_splits = keys.split(sub_batch_size)
 
+                specs = torch.cat([song["specs"] for song in batch], dim=0)
+                specs, keys = collate_spectrograms((specs, keys), shuffle=False)
+
+                # we have to do titles separately as there's no way to convert
+                # strings to tensors
                 titles = []
                 for song in batch:
                     titles.extend([song["json"]["title"]] * song["specs"].shape[0])
@@ -62,13 +66,7 @@ def build_index(
                     for i in range(0, len(titles), sub_batch_size)
                 ]
 
-                specs = collate_spectrograms(batch, col="specs", shuffle=False)
-
-                assert len(specs) == len(key_splits)
-
-                return [
-                    (spec, k, t) for spec, k, t in zip(specs, key_splits, title_splits)
-                ]
+                return [(spec, k, t) for spec, k, t in zip(specs, keys, title_splits)]
 
             # set up the dataloaders
             if isinstance(dataset, dict):
