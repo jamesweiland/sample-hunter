@@ -326,7 +326,7 @@ class Obfuscator(BaseModel):
 
         # build up a sample of songs from musan
         n = signal.shape[0]
-        sample = torch.empty((0, 1, WINDOW_NUM_SAMPLES))
+        sample = torch.empty((0, 1, WINDOW_NUM_SAMPLES), device=signal.device)
         while sample.shape[0] < n:
             idx = random.randint(0, len(self.musan) - 1)
             sample = torch.cat([sample, self.musan[idx]], dim=0)
