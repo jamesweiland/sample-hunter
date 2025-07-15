@@ -45,6 +45,7 @@ network:
 paths:
   log_dir: "_data/logs"
   cache_dir: "_data/cache"
+  musan: "_data/musan"
 
 hf:
   repo_id: "samplr/songs"
