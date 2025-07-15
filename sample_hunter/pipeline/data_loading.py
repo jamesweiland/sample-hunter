@@ -48,8 +48,7 @@ def flatten_sub_batches(
 
 
 def collate_spectrograms(
-    batch: List[Dict[str, torch.Tensor]],
-    col: str | List[str],
+    batch: torch.Tensor | Tuple[torch.Tensor, ...],
     shuffle: bool = True,
     sub_batch_size: int = config.network.sub_batch_size,
 ) -> Tuple[torch.Tensor, ...] | List[Tuple[torch.Tensor, ...]]:
@@ -59,31 +58,28 @@ def collate_spectrograms(
     This function expects tensors with shape (batch_size, num_windows, num_channels, n_mels, time_frames)
     and returns a tensor with shape (new_batch_size, num_channels, n_mels, time_frames)
     """
-
-    if isinstance(col, str):
-        full_tensor = torch.cat([example[col] for example in batch], dim=0)
-
+    if isinstance(batch, torch.Tensor):
         if shuffle:
-            perm = torch.randperm(full_tensor.shape[0])
-            shuffled = full_tensor[perm]
+            perm = torch.randperm(batch.shape[0])
+            shuffled = batch[perm]
             sub_batches = shuffled.split(sub_batch_size)
         else:
-            sub_batches = full_tensor.split(sub_batch_size)
-
+            sub_batches = batch.split(sub_batch_size)
         return tuple(sub_batches)
-    else:
-        full_tensors = [
-            torch.cat([example[name] for example in batch], dim=0) for name in col
-        ]
+
+    elif isinstance(batch, tuple):
+        for i in range(len(batch)):
+            assert batch[0].shape[0] == batch[i].shape[0]
 
         if shuffle:
-            perm = torch.randperm(full_tensors[0].shape[0])
-            shuffled = [t[perm] for t in full_tensors]
+            perm = torch.randperm(batch[0].shape[0])
+            shuffled = [t[perm] for t in batch]
             sub_batches = (t.split(sub_batch_size) for t in shuffled)
         else:
-            sub_batches = (t.split(sub_batch_size) for t in full_tensors)
-
+            sub_batches = (t.split(sub_batch_size) for t in batch)
         return list(zip(*sub_batches))
+
+    raise ValueError(f"Unsupported type for batch: {type(batch)}")
 
 
 def get_tar_files(repo_id: str, split: str, token: str) -> List[str]:

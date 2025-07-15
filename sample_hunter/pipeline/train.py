@@ -44,6 +44,7 @@ def train_single_epoch(
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
+        print(f"Number of unique songs in batch: {torch.unique(keys).numel()}")
 
         # predict embeddings
         anchor_embeddings = model(anchor_batch)
@@ -250,16 +251,12 @@ if __name__ == "__main__":
             keys = torch.tensor([int(song["__key__"]) for song in songs])
             windows_per_song = [song["anchor"].shape[0] for song in songs]
             keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
-            key_splits = keys.split(config.network.sub_batch_size)
 
-            specs = collate_spectrograms(songs, col=["anchor", "positive"])
+            anchors = torch.cat([song["anchor"] for song in songs], dim=0)
+            positives = torch.cat([song["positive"] for song in songs], dim=0)
+            sub_batches = collate_spectrograms((anchors, positives, keys))
 
-            assert len(specs) == len(key_splits)
-
-            return [
-                (anchor, positive, k)
-                for (anchor, positive), k in zip(specs, key_splits)
-            ]
+            return [(anchor, positive, k) for anchor, positive, k in sub_batches]
 
         train_dataset = load_webdataset(config.hf.repo_id, "train", args.token).map(
             map_fn
