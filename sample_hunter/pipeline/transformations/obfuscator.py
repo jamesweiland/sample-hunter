@@ -6,15 +6,13 @@ from pydantic import BaseModel, field_validator
 from typing import Sequence, Tuple
 
 import torchaudio
-import torchaudio.prototype
-import torchaudio.prototype.datasets
 
 from .my_musan import MyMusan
 from .functional import create_windows, mix_channels
 from .tone_generator import ToneGenerator
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
-from sample_hunter._util import WINDOW_NUM_SAMPLES, config, DEVICE, plot_spectrogram
+from sample_hunter._util import WINDOW_NUM_SAMPLES, config, DEVICE
 
 
 class Obfuscator(BaseModel):
@@ -345,7 +343,7 @@ if __name__ == "__main__":
     # listen to obfuscated vs original audio
     from .spectrogram_preprocessor import SpectrogramPreprocessor
     from sample_hunter.pipeline.data_loading import load_webdataset
-    from sample_hunter._util import HF_TOKEN, play_tensor_audio
+    from sample_hunter._util import HF_TOKEN
     from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
 
     with SpectrogramPreprocessor() as preprocessor:
