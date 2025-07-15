@@ -34,8 +34,8 @@ network:
   num_branches: 4
   divide_and_encode_hidden_dim: 256
   embedding_dim: 128
-  source_batch_size: 200 # songs per batch
-  sub_batch_size: 900 # the number of examples the cnn actually trains on at a time
+  source_batch_size: 150 # songs per batch
+  sub_batch_size: 800 # the number of examples the cnn actually trains on at a time
   learning_rate: 0.005
   num_epochs: 100
   alpha: 0.2
