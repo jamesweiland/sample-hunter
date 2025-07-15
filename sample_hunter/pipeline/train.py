@@ -44,7 +44,6 @@ def train_single_epoch(
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
-        print(f"Number of unique songs in batch: {torch.unique(keys).numel()}")
 
         # predict embeddings
         anchor_embeddings = model(anchor_batch)
