@@ -4,6 +4,7 @@ Utility functions for loading in the webdataset.
 
 from collections.abc import Buffer
 import io
+import math
 from pathlib import Path
 import torch
 from typing import Dict, List, Tuple, Generator
@@ -62,9 +63,11 @@ def collate_spectrograms(
         if shuffle:
             perm = torch.randperm(batch.shape[0])
             shuffled = batch[perm]
-            sub_batches = shuffled.split(sub_batch_size)
+            chunks = math.ceil(batch.shape[0] / sub_batch_size)
+            sub_batches = torch.chunk(shuffled, chunks)
         else:
-            sub_batches = batch.split(sub_batch_size)
+            chunks = math.ceil(batch.shape[0] / sub_batch_size)
+            sub_batches = torch.chunk(batch, chunks)
         return tuple(sub_batches)
 
     elif isinstance(batch, tuple):
@@ -74,9 +77,11 @@ def collate_spectrograms(
         if shuffle:
             perm = torch.randperm(batch[0].shape[0])
             shuffled = [t[perm] for t in batch]
-            sub_batches = (t.split(sub_batch_size) for t in shuffled)
+            chunks = math.ceil(batch[0].shape[0] / sub_batch_size)
+            sub_batches = (torch.chunk(t, chunks) for t in shuffled)
         else:
-            sub_batches = (t.split(sub_batch_size) for t in batch)
+            chunks = math.ceil(batch[0].shape[0] / sub_batch_size)
+            sub_batches = (torch.chunk(t, chunks) for t in batch)
         return list(zip(*sub_batches))
 
     raise ValueError(f"Unsupported type for batch: {type(batch)}")
