@@ -116,7 +116,7 @@ def load_webdataset(
     if isinstance(split, str):
         pipe = build_pipe(repo_id, split, token=token)
         return (
-            wds.WebDataset(pipe, shardshuffle=True, cache_dir=cache_dir)
+            wds.WebDataset(pipe, shardshuffle=100, cache_dir=cache_dir)
             .shuffle(200)
             .decode()
         )
@@ -126,7 +126,7 @@ def load_webdataset(
         for s in split:
             pipe = build_pipe(repo_id, s, token=token)
             dataset = (
-                wds.WebDataset(pipe, shardshuffle=True, cache_dir=cache_dir)
+                wds.WebDataset(pipe, shardshuffle=100, cache_dir=cache_dir)
                 .shuffle(200)
                 .decode()
             )
