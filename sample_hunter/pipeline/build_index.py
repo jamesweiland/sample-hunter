@@ -44,7 +44,7 @@ def build_index(
 
             def map_fn(ex):
                 audio, sr = load_tensor_from_bytes(ex["a.mp3"])
-                specs = preprocessor(audio, sample_rate=sr, obfuscate=False)
+                specs = preprocessor(audio, sample_rate=sr, train=False)
                 return {**ex, "specs": specs}
 
             def collate_fn(batch):

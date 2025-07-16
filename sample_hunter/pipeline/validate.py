@@ -1,10 +1,8 @@
 import argparse
-import io
 from pathlib import Path
 from typing import Tuple
 import torch
 import torch.nn as nn
-import torchaudio
 import webdataset as wds
 
 from .evaluate import evaluate_batch
@@ -32,21 +30,8 @@ def validate(
         with SpectrogramPreprocessor() as preprocessor:
 
             def map_fn(ex):
-                anchor = preprocessor(ex["a.mp3"], obfuscate=False)
-                positive = preprocessor(ex["b.mp3"], obfuscate=False)
-                with io.BytesIO(ex["a.mp3"]) as buffer:
-                    anchor, anchor_sr = torchaudio.load(
-                        buffer, format="mp3", backend="ffmpeg"
-                    )
-                    if anchor.ndim == 1:
-                        anchor = anchor.unsqueeze(0)
-
-                with io.BytesIO(ex["b.mp3"]) as buffer:
-                    positive, positive_sr = torchaudio.load(
-                        buffer, format="mp3", backend="ffmpeg"
-                    )
-                    if positive.ndim == 1:
-                        positive = positive.unsqueeze(0)
+                anchor, anchor_sr = load_tensor_from_bytes(ex["a.mp3"])
+                positive, positive_sr = load_tensor_from_bytes(ex["b.mp3"])
 
                 # we resample them out here so we can mess around with the lengths
                 anchor = preprocessor.resample(anchor, anchor_sr)
@@ -58,13 +43,13 @@ def validate(
                     anchor,
                     sample_rate=config.preprocess.sample_rate,
                     target_length=max_length,
-                    obfuscate=False,
+                    train=False,
                 )
                 positive = preprocessor(
                     positive,
                     sample_rate=config.preprocess.sample_rate,
                     target_length=max_length,
-                    obfuscate=False,
+                    train=False,
                 )
 
                 return {**ex, "positive_tensor": positive, "anchor_tensor": anchor}
