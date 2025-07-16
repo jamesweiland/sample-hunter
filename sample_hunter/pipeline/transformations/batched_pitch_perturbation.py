@@ -110,6 +110,10 @@ class BatchedPitchPerturbation:
                     "BatchedPitchPerturbation must be used within context manager for CUDA"
                 )
             for i, mask, sub_batch in shifter_tasks:
+                # skip empty sub_batches, which can happen because of randomness
+                if sub_batch.numel() == 0:
+                    continue
+
                 with torch.cuda.Stream(self._streams[i]):
                     ob[mask] = self.shifters[i](sub_batch)
             for i, _, _ in shifter_tasks:
@@ -122,6 +126,10 @@ class BatchedPitchPerturbation:
                     ob[mask] = result
             else:
                 for i, mask, sub_batch in shifter_tasks:
+                    # skip empty sub_batches, which can happen because of randomness
+                    if sub_batch.numel() == 0:
+                        continue
+
                     ob[mask] = self.shifters[i](sub_batch)
 
         return ob

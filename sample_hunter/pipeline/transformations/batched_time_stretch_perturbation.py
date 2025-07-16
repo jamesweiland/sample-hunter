@@ -134,6 +134,10 @@ class BatchedTimeStretchPerturbation:
                     "BatchedTimeStretchPerturbation must be used within context manager for CUDA"
                 )
             for i, mask, sub_batch, ori_size in stretcher_tasks:
+                # skip empty sub batches, which can happen due to randomness
+                if sub_batch.numel() == 0:
+                    continue
+
                 with torch.cuda.Stream(self._streams[i]):
                     ob[mask] = resize(
                         torch.istft(
@@ -154,6 +158,10 @@ class BatchedTimeStretchPerturbation:
                     ob[mask] = result
             else:
                 for i, mask, sub_batch, ori_size in stretcher_tasks:
+                    # skip empty sub batches, which can happen due to randomness
+                    if sub_batch.numel() == 0:
+                        continue
+
                     ob[mask] = resize(
                         torch.istft(
                             self.stretchers[i](sub_batch),
