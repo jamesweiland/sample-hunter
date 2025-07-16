@@ -6,7 +6,7 @@ preprocess:
   step_length: 0.5 # seconds of overlay
   spectrogram_width: 1.0 # seconds per spectrogram
   volume_threshold: -60 # dB, remove any examples below this threshold
-  take_rate: 0.5 # the percentage of windows to take from a song during training
+  take_rate: 0.1 # the percentage of windows to take from a song during training
   obfuscator:
     time_stretch_factors: [0.75, 1, 1.25, 1.5]
     pitch_factors: [0.6, 0.8, 1, 1.2, 1.5]
