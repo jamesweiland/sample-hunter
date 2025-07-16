@@ -43,9 +43,9 @@ network:
   test_split: 0.25
 
 paths:
-  log_dir: "/home/james/code/sample-hunter/_data/logs"
-  cache_dir: "/home/james/code/sample-hunter/_data/cache"
-  musan: "/home/james/code/sample-hunter/_data/musan"
+  log_dir: "/content/drive/MyDrive/sample-hunter/7-14-2025/logs"
+  cache_dir: "/content/cache/"
+  musan: "/content/drive/MyDrive/sample-hunter/musan"
 
 hf:
   repo_id: "samplr/songs"
