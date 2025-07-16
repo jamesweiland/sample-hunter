@@ -1,3 +1,4 @@
+import traceback
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -249,6 +250,8 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"An error occurred trying to process {ex["json"]["title"]}")
                 print(str(e))
+
+                traceback.print_exc()
                 return ex
 
         def collate_fn(songs):
