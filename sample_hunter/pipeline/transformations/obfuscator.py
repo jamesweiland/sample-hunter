@@ -7,7 +7,7 @@ from typing import Sequence, Tuple
 
 import torchaudio
 
-from .my_musan import MyMusan
+from .my_musan import MusanException, MyMusan
 from .functional import create_windows, mix_channels
 from .tone_generator import ToneGenerator
 from .batched_pitch_perturbation import BatchedPitchPerturbation
@@ -326,8 +326,11 @@ class Obfuscator(BaseModel):
         n = signal.shape[0]
         sample = torch.empty((0, 1, WINDOW_NUM_SAMPLES), device=signal.device)
         while sample.shape[0] < n:
-            idx = random.randint(0, len(self.musan) - 1)
-            sample = torch.cat([sample, self.musan[idx]], dim=0)
+            try:
+                idx = random.randint(0, len(self.musan) - 1)
+                sample = torch.cat([sample, self.musan[idx]], dim=0)
+            except MusanException:
+                continue
         # in case that now sample has more than signal
         sample = sample[:n]
 
