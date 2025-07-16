@@ -296,7 +296,7 @@ if __name__ == "__main__":
 
         def map_fn(ex):
             audio, sr = load_tensor_from_bytes(ex["b.mp3"])
-            spec = preprocessor(audio, obfuscate=False, sample_rate=sr)
+            spec = preprocessor(audio, sample_rate=sr, train=False)
             return {**ex, "specs": spec}
 
         dataset = load_webdataset(args.repo_id, "validation", token=args.token)

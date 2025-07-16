@@ -32,6 +32,7 @@ class SpectrogramPreprocessor:
         mel_spectrogram: torchaudio.transforms.MelSpectrogram = MEL_SPECTROGRAM,
         target_sample_rate: int = config.preprocess.sample_rate,
         volume_threshold: int = config.preprocess.volume_threshold,
+        take_rate: float = config.preprocess.take_rate,
         window_num_samples: int = WINDOW_NUM_SAMPLES,
         step_num_samples: int = STEP_NUM_SAMPLES,
         obfuscator: Obfuscator = Obfuscator(),
@@ -55,6 +56,7 @@ class SpectrogramPreprocessor:
         self.device = device
         self.obfuscator = obfuscator
         self.vol_threshold = volume_threshold
+        self.take_rate = take_rate
         self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB()
 
     def __enter__(self):
@@ -69,8 +71,8 @@ class SpectrogramPreprocessor:
     def __call__(
         self,
         data: Union[Dict, torch.Tensor, bytes],
+        train: bool = False,
         target_length: int | None = None,
-        obfuscate: bool = False,
         sample_rate: int | None = None,
     ):
         """
@@ -103,7 +105,7 @@ class SpectrogramPreprocessor:
             return self.transform(
                 signal=signal,
                 sample_rate=sample_rate,  # type: ignore
-                obfuscate=obfuscate,
+                train=train,
                 target_length=target_length,
             )
 
@@ -111,7 +113,7 @@ class SpectrogramPreprocessor:
         self,
         signal: torch.Tensor,
         sample_rate: int,
-        obfuscate: bool,
+        train: bool = False,
         target_length: int | None = None,
     ) -> Tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """
@@ -129,22 +131,38 @@ class SpectrogramPreprocessor:
 
         # resample to target sampling rate
         signal = self.resample(signal, sample_rate)
-        # make windows with overlay
-        signal = create_windows(
-            signal,
-            target_length=target_length,
-            window_num_samples=self.window_num_samples,
-            step_num_samples=self.step_num_samples,
-        )
 
-        anchor = self.mel_spectrogram(signal)
-        if obfuscate:
-            # obfuscate each window
+        if train:
+            # make windows without overlay for training
+            signal = create_windows(
+                signal,
+                target_length=target_length,
+                window_num_samples=self.window_num_samples,
+                step_num_samples=self.window_num_samples,
+            )
+
+            # take only a fraction of windows from the song
+            k = int(signal.shape[0] * self.take_rate)
+            idx = torch.randperm(signal.shape[0])[:k]
+            signal = signal[idx]
+
+            anchor = self.mel_spectrogram(signal)
 
             positive = self.mel_spectrogram(self.obfuscate_window(signal))
             return positive, anchor
-        # if not obfuscate, just return the regular transformation
-        return anchor
+        else:
+            # make windows with overlay
+            signal = create_windows(
+                signal,
+                target_length=target_length,
+                window_num_samples=self.window_num_samples,
+                step_num_samples=self.step_num_samples,
+            )
+
+            anchor = self.mel_spectrogram(signal)
+
+            # if not train, just return the regular transformation
+            return anchor
 
     def obfuscate_window(self, signal: torch.Tensor) -> torch.Tensor:
         """

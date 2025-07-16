@@ -12,7 +12,7 @@ import pandas as pd
 
 from sample_hunter.config import set_config_path, get_config
 
-CONFIG_PATH: Path = Path("configs/7_15_2025.yaml")
+CONFIG_PATH: Path = Path("configs/7_16_2025.yaml")
 set_config_path(Path(CONFIG_PATH))
 config = get_config()
 

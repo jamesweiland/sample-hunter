@@ -243,7 +243,7 @@ if __name__ == "__main__":
     with SpectrogramPreprocessor() as preprocessor:
 
         def map_fn(ex):
-            positive, anchor = preprocessor(ex["mp3"], obfuscate=True)
+            positive, anchor = preprocessor(ex["mp3"], train=True)
             return {**ex, "positive": positive, "anchor": anchor}
 
         def collate_fn(songs):
