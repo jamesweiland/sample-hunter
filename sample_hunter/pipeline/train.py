@@ -243,10 +243,18 @@ if __name__ == "__main__":
     with SpectrogramPreprocessor() as preprocessor:
 
         def map_fn(ex):
-            positive, anchor = preprocessor(ex["mp3"], train=True)
-            return {**ex, "positive": positive, "anchor": anchor}
+            try:
+                positive, anchor = preprocessor(ex["mp3"], train=True)
+                return {**ex, "positive": positive, "anchor": anchor}
+            except Exception as e:
+                print(f"An error occurred trying to process {ex["json"]["title"]}")
+                print(str(e))
+                return ex
 
         def collate_fn(songs):
+            # filter out songs where preprocessing failed
+            songs = [song for song in songs if "anchor" in song and "positive" in song]
+
             keys = torch.tensor([int(song["__key__"]) for song in songs])
             windows_per_song = [song["anchor"].shape[0] for song in songs]
             keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
