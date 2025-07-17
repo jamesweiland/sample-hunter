@@ -27,7 +27,6 @@ def build_index(
     dataset: wds.WebDataset | Dict[str, wds.WebDataset],
     embedding_dim: int = config.network.embedding_dim,
     source_batch_size: int = config.network.source_batch_size,
-    sub_batch_size: int = config.network.sub_batch_size,
     device: str = DEVICE,
 ) -> Tuple[faiss.IndexFlatL2, pd.DataFrame]:
     """
@@ -53,7 +52,7 @@ def build_index(
                 keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
 
                 specs = torch.cat([song["specs"] for song in batch], dim=0)
-                specs, keys = collate_spectrograms((specs, keys), shuffle=False)
+                collated_list = collate_spectrograms((specs, keys), shuffle=False)
 
                 # we have to do titles separately as there's no way to convert
                 # strings to tensors
@@ -61,12 +60,18 @@ def build_index(
                 for song in batch:
                     titles.extend([song["json"]["title"]] * song["specs"].shape[0])
                 # Split titles to match sub-batches
-                title_splits = [
-                    titles[i : i + sub_batch_size]
-                    for i in range(0, len(titles), sub_batch_size)
-                ]
+                title_splits = []
+                start = 0
+                for i in range(len(collated_list)):
+                    # the ith member of collated_list is a (spec, key) tensor tuple
+                    title_splits.append(
+                        titles[start : start + collated_list[i][0].shape[0]]
+                    )
+                    start += collated_list[i][0].shape[0]
 
-                return [(spec, k, t) for spec, k, t in zip(specs, keys, title_splits)]
+                return [
+                    (spec, k, t) for (spec, k), t in zip(collated_list, title_splits)
+                ]
 
             # set up the dataloaders
             if isinstance(dataset, dict):

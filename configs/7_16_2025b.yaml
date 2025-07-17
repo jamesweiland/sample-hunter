@@ -35,17 +35,17 @@ network:
   num_branches: 4
   divide_and_encode_hidden_dim: 256
   embedding_dim: 128
-  source_batch_size: 100 # songs per batch
-  sub_batch_size: 1000 # the number of examples the cnn actually trains on at a time
+  source_batch_size: 200 # songs per batch
+  sub_batch_size: 1400 # the number of examples the cnn actually trains on at a time
   learning_rate: 0.00005
   num_epochs: 100
   alpha: 0.2
   test_split: 0.25
 
 paths:
-  log_dir: "/content/drive/MyDrive/sample-hunter/7-14-2025/logs"
-  cache_dir: "/content/cache/"
-  musan: "/content/drive/MyDrive/sample-hunter/musan"
+  log_dir: "/home/james/code/sample-hunter/_data/logs"
+  cache_dir: "/home/james/code/sample-hunter/_data/cache"
+  musan: "/home/james/code/sample-hunter/_data/musan"
 
 hf:
   repo_id: "samplr/songs"
