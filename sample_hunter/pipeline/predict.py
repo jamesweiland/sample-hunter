@@ -296,7 +296,12 @@ if __name__ == "__main__":
 
         def map_fn(ex):
             audio, sr = load_tensor_from_bytes(ex["b.mp3"])
-            spec = preprocessor(audio, sample_rate=sr, train=False)
+
+            spec = preprocessor(
+                audio,
+                sample_rate=sr,
+                train=False,
+            )
             return {**ex, "specs": spec}
 
         dataset = load_webdataset(args.repo_id, "validation", token=args.token)
@@ -318,9 +323,19 @@ if __name__ == "__main__":
             # play_tensor_audio(positive, "Playing positive...", sample_rate=positive_sr)
 
             res = validate_vector_search(ex["specs"], index, model, metadata, anchor_id)
+            BOLD = "\033[1m"
+            RESET = "\033[0m"
+            RED = "\033[91m"
+            GREEN = "\033[92m"
 
             if res:
                 num_right += 1
+                print(f"{BOLD}{GREEN}SUCCESS: {ex["json"]["title"]}{RESET}")
+            else:
+                print(f"{BOLD}{RED}FAIL: {ex["json"]["title"]} failed{RESET}")
+
+            # play_tensor_audio(anchor, "Playing anchor...", sample_rate=anchor_sr)
+            # play_tensor_audio(positive, "Playing positive...", sample_rate=positive_sr)
             num_total += 1
 
             # prediction, score = predict(
