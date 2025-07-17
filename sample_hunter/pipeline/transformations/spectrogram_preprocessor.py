@@ -25,7 +25,6 @@ from sample_hunter._util import (
     MEL_SPECTROGRAM,
     STEP_NUM_SAMPLES,
     WINDOW_NUM_SAMPLES,
-    play_tensor_audio,
 )
 
 
