@@ -78,10 +78,10 @@ def collate_spectrograms(
             perm = torch.randperm(batch[0].shape[0])
             shuffled = [t[perm] for t in batch]
             chunks = math.ceil(batch[0].shape[0] / sub_batch_size)
-            sub_batches = (torch.chunk(t, chunks) for t in shuffled)
+            sub_batches = [torch.chunk(t, chunks) for t in shuffled]
         else:
             chunks = math.ceil(batch[0].shape[0] / sub_batch_size)
-            sub_batches = (torch.chunk(t, chunks) for t in batch)
+            sub_batches = [torch.chunk(t, chunks) for t in batch]
         return list(zip(*sub_batches))
 
     raise ValueError(f"Unsupported type for batch: {type(batch)}")

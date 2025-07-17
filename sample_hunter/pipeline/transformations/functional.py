@@ -78,6 +78,19 @@ def resample(
     return signal
 
 
+def dbfs(signal: torch.Tensor) -> torch.Tensor:
+    """
+    Convert an audio signal to dbfs scale, for determining the absolute power of the signal
+
+    signal: an audio tensor that is normalized to (-1, 1)
+    """
+    ref = 1.0  # full scale for normalized audio
+    eps = 1e-10  # to avoid log(0)
+    window_rms = signal.square().mean(dim=(1, 2)).sqrt() + eps
+    dbfs = 20 * torch.log10(window_rms / ref)
+    return dbfs
+
+
 def remove_low_volume_windows(signal: torch.Tensor, vol_threshold: int) -> torch.Tensor:
     """
     signal is a batch of windows with size (W, 1, S), W is number of windows that represents the song
@@ -85,10 +98,9 @@ def remove_low_volume_windows(signal: torch.Tensor, vol_threshold: int) -> torch
     note: if there are no windows above the threshold, this function will return the
     passed signal unmodified
     """
-    signal_db = torchaudio.transforms.AmplitudeToDB()(signal)
-    mean_db_per_example = signal_db.mean(dim=(1, 2))
-    signals_above_threshold = mean_db_per_example > vol_threshold
-    if len(signals_above_threshold) == len(signal):
+    signal_dbfs = dbfs(signal)
+    signals_above_threshold = signal_dbfs > vol_threshold
+    if len(signals_above_threshold) == 0:
         warnings.warn(
             "No windows were found to be above the threshold. "
             "Returning the original signal unmodified."

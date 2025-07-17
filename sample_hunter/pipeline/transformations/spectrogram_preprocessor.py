@@ -12,13 +12,20 @@ from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
 
 
 from .obfuscator import Obfuscator
-from .functional import create_windows, mix_channels, resize, num_windows
+from .functional import (
+    create_windows,
+    mix_channels,
+    remove_low_volume_windows,
+    resize,
+    num_windows,
+)
 from sample_hunter._util import (
     config,
     DEVICE,
     MEL_SPECTROGRAM,
     STEP_NUM_SAMPLES,
     WINDOW_NUM_SAMPLES,
+    play_tensor_audio,
 )
 
 
@@ -58,7 +65,6 @@ class SpectrogramPreprocessor:
         self.obfuscator = obfuscator
         self.vol_threshold = volume_threshold
         self.take_rate = take_rate
-        self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB()
 
     def __enter__(self):
         """Set up the resources for the downstream classes"""
@@ -142,7 +148,7 @@ class SpectrogramPreprocessor:
                 step_num_samples=self.window_num_samples,
             )
 
-            signal = self.remove_low_volume_windows(signal)
+            signal = remove_low_volume_windows(signal, vol_threshold=self.vol_threshold)
 
             # take only a fraction of windows from the song
             k = math.ceil(signal.shape[0] * self.take_rate)
@@ -162,7 +168,7 @@ class SpectrogramPreprocessor:
                 step_num_samples=self.step_num_samples,
             )
 
-            signal = self.remove_low_volume_windows(signal)
+            signal = remove_low_volume_windows(signal, vol_threshold=self.vol_threshold)
 
             anchor = self.mel_spectrogram(signal)
 
@@ -194,9 +200,3 @@ class SpectrogramPreprocessor:
             )
             torch.set_num_threads(torch.multiprocessing.cpu_count())
         return signal
-
-    def remove_low_volume_windows(self, signal: torch.Tensor) -> torch.Tensor:
-        signal_db = self.amplitude_to_db(signal)
-        mean_db_per_example = signal_db.mean(dim=(1, 2))
-        signals_above_threshold = mean_db_per_example > self.vol_threshold
-        return signal[signals_above_threshold]
