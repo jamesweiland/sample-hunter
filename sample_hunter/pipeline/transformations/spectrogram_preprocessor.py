@@ -3,6 +3,7 @@ Custom generator functions to transform/pre-process data that is sitting
 in the huggingface dataset.
 """
 
+import math
 import torch
 import torchaudio
 from typing import Dict, Tuple, Union
@@ -141,8 +142,10 @@ class SpectrogramPreprocessor:
                 step_num_samples=self.window_num_samples,
             )
 
+            signal = self.remove_low_volume_windows(signal)
+
             # take only a fraction of windows from the song
-            k = int(signal.shape[0] * self.take_rate)
+            k = math.ceil(signal.shape[0] * self.take_rate)
             idx = torch.randperm(signal.shape[0])[:k]
             signal = signal[idx]
 
@@ -158,6 +161,8 @@ class SpectrogramPreprocessor:
                 window_num_samples=self.window_num_samples,
                 step_num_samples=self.step_num_samples,
             )
+
+            signal = self.remove_low_volume_windows(signal)
 
             anchor = self.mel_spectrogram(signal)
 
