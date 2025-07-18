@@ -84,11 +84,17 @@ def parse_args():
         help="The minimum overlap when offsetting two songs",
     )
 
+    parser.add_argument(
+        "--dry",
+        action="store_true",
+        help="option to do a dry run and not delete anything or write to matches.txt",
+    )
+
     return parser.parse_args()
 
 
 def worker_func(pair):
-    a, b, span, step, overlap, threshold, lock = pair
+    a, b, span, step, overlap, threshold, dry, lock = pair
     a_path = Path(a["filename"])
     b_path = Path(b["filename"])
     # they could've already been handled
@@ -103,9 +109,10 @@ def worker_func(pair):
         match = f"{a_path.stem} and {b_path.stem} match with a similarity of {corr}"
         print(match)
 
-        with lock:
-            if b_path.exists():
-                b_path.unlink()
+        if not dry:
+            with lock:
+                if b_path.exists():
+                    b_path.unlink()
 
         return match
 
@@ -120,17 +127,22 @@ if __name__ == "__main__":
     manager = mp.Manager()
     lock = manager.Lock()
     jobs = [
-        (a, b, args.span, args.step, args.overlap, args.threshold, lock)
+        (a, b, args.span, args.step, args.overlap, args.threshold, args.dry, lock)
         for a, b in combinations(fingerprints, 2)
     ]
 
     with mp.Pool(mp.cpu_count()) as pool:
         results = tqdm(pool.imap_unordered(worker_func, jobs), total=n_iter)
 
-        with open("./_data/matches.txt", "w") as out:
-            for result in results:
-                if result is not None:
-                    print(result, file=out)
+        if not args.dry:
+            with open("./_data/matches.txt", "w") as out:
+                for result in results:
+                    if result is not None:
+                        print(result, file=out)
+        else:
+            # we still have to iterate over this because imap_unordered is lazy
+            for _ in results:
+                pass
 
     # with open("./_data/matches.txt", 'w') as out:
     #     for a, b in tqdm(combinations(fingerprints, 2), total=n_iter):
