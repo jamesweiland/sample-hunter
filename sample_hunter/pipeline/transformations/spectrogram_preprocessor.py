@@ -149,10 +149,11 @@ class SpectrogramPreprocessor:
 
             signal = remove_low_volume_windows(signal, vol_threshold=self.vol_threshold)
 
-            # take only a fraction of windows from the song
-            k = math.ceil(signal.shape[0] * self.take_rate)
-            idx = torch.randperm(signal.shape[0])[:k]
-            signal = signal[idx]
+            if self.take_rate < 1.0:
+                # take only a fraction of windows from the song
+                k = math.ceil(signal.shape[0] * self.take_rate)
+                idx = torch.randperm(signal.shape[0])[:k]
+                signal = signal[idx]
 
             anchor = self.mel_spectrogram(signal)
 
