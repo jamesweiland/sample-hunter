@@ -450,6 +450,18 @@ wheels = [
 ]
 
 [[package]]
+name = "ffmpeg-python"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "future" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dd/5e/d5f9105d59c1325759d838af4e973695081fbbc97182baf73afc78dec266/ffmpeg-python-0.2.0.tar.gz", hash = "sha256:65225db34627c578ef0e11c8b1eb528bb35e024752f6f10b78c011f6f64c4127", size = 21543, upload-time = "2019-07-06T00:19:08.989Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/0c/56be52741f75bad4dc6555991fabd2e07b432d333da82c11ad701123888a/ffmpeg_python-0.2.0-py3-none-any.whl", hash = "sha256:ac441a0404e053f8b6a1113a77c0f452f1cfc62f6344a769475ffdc0f56c23c5", size = 25024, upload-time = "2019-07-06T00:19:07.215Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.18.0"
 source = { registry = "https://pypi.org/simple" }
@@ -555,6 +567,15 @@ wheels = [
 [package.optional-dependencies]
 http = [
     { name = "aiohttp" },
+]
+
+[[package]]
+name = "future"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a7/b2/4140c69c6a66432916b26158687e821ba631a4c9273c474343badf84d3ba/future-1.0.0.tar.gz", hash = "sha256:bd2968309307861edae1458a4f8a4f3598c03be43b97521076aebf5d94c07b05", size = 1228490, upload-time = "2024-02-21T11:52:38.461Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/71/ae30dadffc90b9006d77af76b393cb9dfbfc9629f339fc1574a1c52e6806/future-1.0.0-py3-none-any.whl", hash = "sha256:929292d34f5872e70396626ef385ec22355a1fae8ad29e1a734c3e43f9fbc216", size = 491326, upload-time = "2024-02-21T11:52:35.956Z" },
 ]
 
 [[package]]
@@ -1005,6 +1026,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b9/69/06c3b2776c90257354176d6a3caf3c4a74f2d2920c96c456b149109a6456/memray-1.17.2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e871af5a88006f9c0d16cb234e9d18244ffeb28f5c8aa17bd6babc8418fdda1d", size = 8235642, upload-time = "2025-05-09T02:03:00.913Z" },
     { url = "https://files.pythonhosted.org/packages/a6/d4/7adf788b3bb1652131bdd086434ec4e337c46fc8df9809a8d0887aebd400/memray-1.17.2-cp313-cp313-musllinux_1_1_x86_64.whl", hash = "sha256:63f0a8d5d9d179648e7e336f8a185e8f4a1b70f28ec62476e193c024aa992313", size = 8183003, upload-time = "2025-05-09T02:03:02.792Z" },
 ]
+
+[[package]]
+name = "mp3hash"
+version = "0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/56/2e68d06d3f8973dd0b3a3a4e676bd48926ff457aaedc96c37aeb57d82ef3/mp3hash-0.1.tar.gz", hash = "sha256:255d9703907523bec6b2d24eb27361e11a070ef5810e88f5c82fc84d740d7a9c", size = 9706, upload-time = "2013-04-15T19:15:24.783Z" }
 
 [[package]]
 name = "mpmath"
@@ -1570,6 +1597,16 @@ wheels = [
 ]
 
 [[package]]
+name = "pyacoustid"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "audioread" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1e/c7/48a17b6a75888cf760a95f677cec5fe68fd00edf9072df14071008d9b2c0/pyacoustid-1.3.0.tar.gz", hash = "sha256:5f4f487191c19ebb908270b1b7b5297f132da332b1568b96a914574c079ed177", size = 17369, upload-time = "2023-09-12T19:25:21.258Z" }
+
+[[package]]
 name = "pyarrow"
 version = "20.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2003,15 +2040,18 @@ dependencies = [
     { name = "datasets" },
     { name = "dotenv" },
     { name = "faiss-cpu" },
+    { name = "ffmpeg-python" },
     { name = "http-request-randomizer" },
     { name = "librosa" },
     { name = "lxml" },
     { name = "matplotlib" },
     { name = "memray" },
+    { name = "mp3hash" },
     { name = "mutagen" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "plyer" },
+    { name = "pyacoustid" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "python-socketio", extra = ["asyncio-client", "client"] },
@@ -2040,15 +2080,18 @@ requires-dist = [
     { name = "datasets", specifier = ">=3.6.0" },
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "faiss-cpu", specifier = ">=1.11.0" },
+    { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "http-request-randomizer", specifier = ">=1.3.2" },
     { name = "librosa", specifier = ">=0.11.0" },
     { name = "lxml", specifier = ">=5.4.0" },
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "memray", specifier = ">=1.17.2" },
+    { name = "mp3hash", specifier = ">=0.1" },
     { name = "mutagen", specifier = ">=1.47.0" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "plyer", specifier = ">=2.1.0" },
+    { name = "pyacoustid", specifier = ">=1.3.0" },
     { name = "pydantic", specifier = ">=2.11.5" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "python-socketio", extras = ["async-client", "asyncio-client", "client"], specifier = ">=5.13.0" },
