@@ -8,7 +8,12 @@ from typing import Sequence, Tuple
 import torchaudio
 
 from .my_musan import MusanException, MyMusan
-from .functional import create_windows, mix_channels
+from .functional import (
+    create_windows,
+    mix_channels,
+    remove_low_volume_windows,
+    resample,
+)
 from .tone_generator import ToneGenerator
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
@@ -50,6 +55,9 @@ class Obfuscator(BaseModel):
     highpass_range: Tuple[int, int] = config.preprocess.obfuscator.highpass_range
     whitenoise_range: Tuple[float, float] = (
         config.preprocess.obfuscator.whitenoise_range
+    )
+    musan_noise_range: Tuple[float, float] = (
+        config.preprocess.obfuscator.musan_noise_range
     )
     num_tones_to_add: int = config.preprocess.obfuscator.num_tones_to_add
     tone_gen_frequency_range: Tuple[int, int] = (
@@ -325,17 +333,20 @@ class Obfuscator(BaseModel):
         # build up a sample of songs from musan
         n = signal.shape[0]
         sample = torch.empty((0, 1, WINDOW_NUM_SAMPLES), device=signal.device)
+        print(n)
         while sample.shape[0] < n:
             try:
+                print(sample.shape[0])
                 idx = random.randint(0, len(self.musan) - 1)
-                sample = torch.cat([sample, self.musan[idx]], dim=0)
+                musan_signal, name = self.musan[idx]
+                sample = torch.cat([sample, musan_signal], dim=0)
             except MusanException:
                 continue
         # in case that now sample has more than signal
         sample = sample[:n]
 
-        noise_levels = self.whitenoise_range[0] + (
-            self.whitenoise_range[1] - self.whitenoise_range[0]
+        noise_levels = self.musan_noise_range[0] + (
+            self.musan_noise_range[1] - self.musan_noise_range[0]
         ) * torch.rand(signal.shape[0], device=signal.device, dtype=torch.float16)
         return torchaudio.functional.add_noise(
             waveform=signal, noise=sample, snr=noise_levels.unsqueeze(1)
@@ -354,13 +365,21 @@ if __name__ == "__main__":
 
         def map_fn(ex):
             # load the audio as tensor form so it can be passed to obfuscator
-            audio, sr = load_tensor_from_bytes(ex["mp3"])
-            audio = mix_channels(audio)
-            audio = preprocessor.resample(audio, sr)
-            anchor = create_windows(audio)
+            signal, sr = load_tensor_from_bytes(ex["mp3"])
+            # mix to mono
+            signal = mix_channels(signal)
+
+            # resample to target sampling rate
+            signal = resample(signal, sr, config.preprocess.sample_rate)
+
+            signal = create_windows(signal)
+
+            anchor = remove_low_volume_windows(
+                signal, config.preprocess.volume_threshold
+            )
 
             positive = preprocessor.obfuscate_window(anchor)
-            positive = preprocessor.obfuscator.overlay_musan(positive)
+
             return {
                 **ex,
                 "anchor": anchor,
@@ -373,7 +392,7 @@ if __name__ == "__main__":
         for ex in dataset:
             print(f"Song: {ex["json"]["title"]}\n")
 
-            for i in range(ex["anchor"].shape[0]):
+            for i in range(min(ex["anchor"].shape[0], 10)):
                 play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
                 play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
                 plot_spectrogram(ex["anchor_spec"][i], f"anchor {i}")
