@@ -16,7 +16,7 @@ import pandas as pd
 
 from sample_hunter.config import set_config_path, get_config
 
-CONFIG_PATH: Path = Path("configs/7_16_2025.yaml")
+CONFIG_PATH: Path = Path("configs/7_18_2025.yaml")
 set_config_path(Path(CONFIG_PATH))
 config = get_config()
 
@@ -85,6 +85,7 @@ def play_tensor_audio(
     tensor: torch.Tensor,
     message: str | None = None,
     sample_rate=config.preprocess.sample_rate,
+    max_sec: int | None = None,
 ):
     """Halt script execution to play a tensor as audio"""
     # tensor: shape (1, T) or (T,)
@@ -94,6 +95,10 @@ def play_tensor_audio(
             arr = arr.T
         elif arr.shape[0] == 1:  # mono
             arr = arr.squeeze(0)  # sd doesn't like the extra dimension
+
+    if max_sec:
+        num_samples = int(sample_rate * max_sec)
+        arr = arr[:num_samples]
 
     if message:
         print(message)

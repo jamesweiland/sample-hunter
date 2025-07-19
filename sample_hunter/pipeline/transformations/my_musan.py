@@ -42,4 +42,4 @@ class MyMusan(torch.utils.data.Dataset):
         )  # we don't want these to be overlaying
         signal = remove_low_volume_windows(signal, config.preprocess.volume_threshold)
 
-        return signal
+        return signal, name
