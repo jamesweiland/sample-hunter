@@ -55,6 +55,13 @@ class NetworkConfig:
 
 
 @dataclass
+class PostConfig:
+    span: float
+    step: float
+    alpha: float
+
+
+@dataclass
 class PathsConfig:
     log_dir: Path
     cache_dir: Path
@@ -73,6 +80,7 @@ class Config:
     network: NetworkConfig
     paths: PathsConfig
     hf: HuggingfaceConfig
+    post: PostConfig
 
 
 def set_config_path(path: Path):
@@ -143,6 +151,9 @@ def load_config(config_path: Path) -> Config:
         alpha=cfg["network"]["alpha"],
         test_split=cfg["network"]["test_split"],
     )
+    post = PostConfig(
+        span=cfg["post"]["span"], step=cfg["post"]["step"], alpha=cfg["post"]["alpha"]
+    )
     paths = PathsConfig(
         log_dir=Path(cfg["paths"]["log_dir"]),
         cache_dir=Path(cfg["paths"]["cache_dir"]),
@@ -155,6 +166,7 @@ def load_config(config_path: Path) -> Config:
     return Config(
         preprocess=preprocess,
         network=network,
+        post=post,
         paths=paths,
         hf=hf,
     )

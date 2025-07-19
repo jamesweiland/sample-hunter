@@ -162,16 +162,12 @@ def evaluate_candidate(
     while start <= (candidate_song.shape[0] - query_sequence.shape[0]):
         end = start + query_sequence.shape[0]
         candidate_sequence = candidate_song[start:end, ...]
-        similarity = (
-            sequence_similarity(
-                x=query_sequence,
-                y=candidate_sequence,
-                y_song_id=candidate_song_id,
-                index=index,
-                metadata=metadata,
-            )
-            .mean()
-            .item()
+        similarity = sequence_similarity(
+            x=query_sequence,
+            y=candidate_sequence,
+            y_song_id=candidate_song_id,
+            index=index,
+            metadata=metadata,
         )
         if best_similarity is None or similarity > best_similarity:
             best_similarity = float(similarity)
@@ -181,6 +177,22 @@ def evaluate_candidate(
     return best_similarity
 
 
+def sequence_similarity_with_offset(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    y_song_id: int,
+    index: faiss.Index,
+    metadata: pd.DataFrame,
+    span: float = config.post.span,
+    step: float = config.post.step,
+    alpha: float = config.post.alpha,
+) -> float:
+    """
+    return the max similarity between x and y, where y is offset from x between -span and span with size of step
+    """
+    pass
+
+
 def sequence_similarity(
     x: torch.Tensor,
     y: torch.Tensor,
@@ -188,7 +200,7 @@ def sequence_similarity(
     index: faiss.Index,
     metadata: pd.DataFrame,
     alpha: float = 9.0,
-) -> torch.Tensor:
+) -> float:
     """
     Pairwise sequence similarity metric developed in https://openaccess.thecvf.com/content_cvpr_2013/papers/Qin_Query_Adaptive_Similarity_2013_CVPR_paper.pdf
 
@@ -198,8 +210,10 @@ def sequence_similarity(
     """
     # we take the mean of the pairwise sequence similarity to determine the total similarity
     # of the sequence
-    return torch.exp(
-        -alpha * normalized_distance(x, y, y_song_id, index, metadata) ** 4
+    return (
+        torch.exp(-alpha * normalized_distance(x, y, y_song_id, index, metadata) ** 4)
+        .mean()
+        .item()
     )
 
 
