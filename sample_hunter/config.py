@@ -59,6 +59,7 @@ class PostConfig:
     span: float
     step: float
     alpha: float
+    k: int
 
 
 @dataclass
@@ -152,7 +153,10 @@ def load_config(config_path: Path) -> Config:
         test_split=cfg["network"]["test_split"],
     )
     post = PostConfig(
-        span=cfg["post"]["span"], step=cfg["post"]["step"], alpha=cfg["post"]["alpha"]
+        span=cfg["post"]["span"],
+        step=cfg["post"]["step"],
+        alpha=cfg["post"]["alpha"],
+        k=cfg["post"]["k"],
     )
     paths = PathsConfig(
         log_dir=Path(cfg["paths"]["log_dir"]),

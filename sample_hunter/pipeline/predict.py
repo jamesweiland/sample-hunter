@@ -19,13 +19,13 @@ def validate_vector_search(
     model: EncoderNet,
     metadata: pd.DataFrame,
     gt: int,
-    k: int = 5,
+    k: int = config.post.k,
 ) -> bool:
     """Returns True if gt is in the vector search for the spectrogram, False otherwise"""
     with torch.no_grad():
         model.eval()
-        embeddings = model(spectrogram)
 
+        embeddings = model(spectrogram)
         D, I = index.search(embeddings, k)
         for neighbors in I:
             for neighbor in neighbors:
@@ -105,35 +105,6 @@ def predict(
                 print("The correct song WAS NOT a candidate")
         return best_candidate, best_score
 
-        # return the match with the least distance
-        # distances = {}
-        # for neighbor, dist in zip(I, D):
-        #     song_id = metadata[metadata["snippet_id"] == neighbor]["song_id"]
-        #     assert len(song_id) == 1
-        #     song_id = int(song_id.iloc[0])
-        #     if song_id not in distances:
-        #         distances[song_id] = {"total_dist": 0.0, "count": 0}
-
-        #     distances[song_id]["total_dist"] += dist
-        #     distances[song_id]["count"] += 1
-
-        # avg_distances = {k: v["total_dist"] / v["count"] for k, v in distances.items()}
-        # best_match = min(avg_distances, key=avg_distances.get)
-
-        # count up all the matches and return the one with the most matches
-        # matches = {}
-        # for neighbor in I:
-        #     song_id = metadata[metadata["snippet_id"] == neighbor]["song_id"]
-        #     assert len(song_id) == 1
-        #     song_id = song_id.iloc[0]
-        #     if matches.get(song_id) is None:
-        #         matches[int(song_id)] = 1
-        #     else:
-        #         matches[int(song_id)] += 1
-
-        # best_match = max(matches, key=matches.get)
-        # return best_match
-
 
 def evaluate_candidate(
     query_sequence: torch.Tensor,
@@ -141,6 +112,10 @@ def evaluate_candidate(
     candidate_song_id: int,
     index: faiss.Index,
     metadata: pd.DataFrame,
+    span: float = config.post.span,
+    step: float = config.post.step,
+    alpha: float = config.post.alpha,
+    sample_rate: int = config.preprocess.sample_rate,
 ) -> float:
     """
     Slide the query sequence over the candidate song and find the sequence in the
@@ -152,6 +127,8 @@ def evaluate_candidate(
 
     candidate_song_id: an int that is the candidate song's song_id in metadata.
     """
+    span_num_samples = int(span * sample_rate)
+    step_num_samples = int(step * sample_rate)
     if candidate_song.shape[0] < query_sequence.shape[0]:
         # pad candidate_song to query_sequence's length
         pad_size = query_sequence.shape[0] - candidate_song.shape[0]
@@ -162,15 +139,25 @@ def evaluate_candidate(
     while start <= (candidate_song.shape[0] - query_sequence.shape[0]):
         end = start + query_sequence.shape[0]
         candidate_sequence = candidate_song[start:end, ...]
-        similarity = sequence_similarity(
-            x=query_sequence,
-            y=candidate_sequence,
-            y_song_id=candidate_song_id,
-            index=index,
-            metadata=metadata,
-        )
-        if best_similarity is None or similarity > best_similarity:
-            best_similarity = float(similarity)
+
+        # for each offset, calculate the sequence similarity with offset and store it in
+        # similarities, then store that in some best_similarity
+        similarities = [
+            sequence_similarity_with_offset(
+                x=query_sequence,
+                y=candidate_sequence,
+                y_song_id=candidate_song_id,
+                index=index,
+                metadata=metadata,
+                offset_num_samples=offset_num_samples,
+                alpha=alpha,
+            )
+            for offset_num_samples in range(
+                -span_num_samples, span_num_samples + step_num_samples, step_num_samples
+            )
+        ]
+        if best_similarity is None or max(similarities) > best_similarity:
+            best_similarity = float(max(similarities))
         start += 1
     assert best_similarity is not None
 
@@ -183,14 +170,30 @@ def sequence_similarity_with_offset(
     y_song_id: int,
     index: faiss.Index,
     metadata: pd.DataFrame,
-    span: float = config.post.span,
-    step: float = config.post.step,
+    offset_num_samples: int,
     alpha: float = config.post.alpha,
 ) -> float:
     """
-    return the max similarity between x and y, where y is offset from x between -span and span with size of step
+    return the similarity between x and y, where y is offset from x between -span and span with size of step
+
+    offset is the number of samples to offset y from x
     """
-    pass
+    if offset_num_samples > 0:
+        x = x[offset_num_samples:]
+        y = y[: len(x)]
+    elif offset_num_samples < 0:
+        offset_num_samples = -offset_num_samples
+        y = y[offset_num_samples:]
+        x = x[: len(y)]
+
+    return sequence_similarity(
+        x=x,
+        y=y,
+        y_song_id=y_song_id,
+        index=index,
+        metadata=metadata,
+        alpha=alpha,
+    )
 
 
 def sequence_similarity(
@@ -311,12 +314,30 @@ if __name__ == "__main__":
         def map_fn(ex):
             audio, sr = load_tensor_from_bytes(ex["b.mp3"])
 
-            spec = preprocessor(
-                audio,
-                sample_rate=sr,
-                train=False,
-            )
-            return {**ex, "specs": spec}
+            span_num_samples = int(config.post.span * sr)
+            step_num_samples = int(config.post.step * sr)
+
+            offsets = []
+            for offset_num_samples in range(
+                -span_num_samples, span_num_samples + step_num_samples, step_num_samples
+            ):
+                if offset_num_samples < 0:
+                    offset = audio[:, abs(offset_num_samples) :]
+                elif offset_num_samples > 0:
+                    offset = torch.nn.functional.pad(audio, (offset_num_samples, 0))
+                else:
+                    offset = audio
+                offsets.append(offset)
+
+            specs = [
+                preprocessor(
+                    offset,
+                    sample_rate=sr,
+                    train=False,
+                )
+                for offset in offsets
+            ]
+            return {**ex, "specs": specs}
 
         dataset = load_webdataset(args.repo_id, "validation", token=args.token)
         dataset = dataset.map(map_fn)
@@ -336,16 +357,20 @@ if __name__ == "__main__":
             # play_tensor_audio(anchor, "Playing anchor...", sample_rate=anchor_sr)
             # play_tensor_audio(positive, "Playing positive...", sample_rate=positive_sr)
 
-            res = validate_vector_search(ex["specs"], index, model, metadata, anchor_id)
             BOLD = "\033[1m"
             RESET = "\033[0m"
             RED = "\033[91m"
             GREEN = "\033[92m"
 
-            if res:
-                num_right += 1
-                print(f"{BOLD}{GREEN}SUCCESS: {ex["json"]["title"]}{RESET}")
-            else:
+            success = False
+            for spec in ex["specs"]:
+                if validate_vector_search(spec, index, model, metadata, anchor_id):
+                    num_right += 1
+                    success = True
+                    print(f"{BOLD}{GREEN}SUCCESS: {ex["json"]["title"]}{RESET}")
+                    break
+
+            if not success:
                 print(f"{BOLD}{RED}FAIL: {ex["json"]["title"]} failed{RESET}")
 
             # play_tensor_audio(anchor, "Playing anchor...", sample_rate=anchor_sr)

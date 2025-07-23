@@ -47,6 +47,7 @@ post:
   span: 0.5 # absolute value of seconds to offset positive from ground
   step: 0.01 # seconds to step each offset from -span to span
   alpha: 9.0 # constant to use in sequence similarity formula
+  k: 10
 
 paths:
   log_dir: "/home/james/code/sample-hunter/_data/logs"
