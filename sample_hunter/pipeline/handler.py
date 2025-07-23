@@ -14,9 +14,16 @@ from sample_hunter._util import load_model
 
 class EndpointHandler:
     def __init__(self, model_dir, **kwargs):
-        self.model = load_model(Path("./7-18-2025-1.pth"))
+        model_path = Path(model_dir / "7-18-2025-1.pth")
+        self.model = load_model(model_path)
         self.model.eval()
 
     def __call__(self, data):
         with torch.no_grad():
-            return self.model(data)
+            try:
+                inputs = data["inputs"]
+                return self.model(inputs)
+            except KeyError:
+                # this means data didn't contain an inputs field
+                # raise a value error which will make HF return code 400
+                raise ValueError("inputs field is required")
