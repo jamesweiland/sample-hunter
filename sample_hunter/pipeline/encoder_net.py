@@ -1,55 +1,67 @@
 import torch
 import torch.nn as nn
-from typing import List, Tuple
+from transformers.modeling_utils import PreTrainedModel
 
-from sample_hunter._util import config, INPUT_SHAPE
+from sample_hunter.config import EncoderNetConfig
 
 
-class EncoderNet(nn.Module):
-    def __init__(
-        self,
-        input_shape: torch.Size = INPUT_SHAPE,
-        conv_layer_dims: List[Tuple[int, int]] = config.network.conv_layer_dims,
-        minimum_dims: Tuple[int, int] = config.network.min_dims,
-        stride: int = config.network.stride,
-        padding: int = config.network.padding,
-        pool_kernel_size: int = config.network.pool_kernel_size,
-        num_branches: int = config.network.num_branches,
-        divide_and_encode_hidden_dim: int = config.network.divide_and_encode_hidden_dim,
-        embedding_dim: int = config.network.embedding_dim,
-    ):
-        super().__init__()
+class EncoderNet(PreTrainedModel):
+    config_class = EncoderNetConfig
+
+    def __init__(self, config: EncoderNetConfig | None = None, **kwargs):
+        config = config or EncoderNetConfig()
+        config = config.merge_kwargs(**kwargs)
+        super().__init__(config)
+        self.config = config
+
+        spec_num_samples = int(
+            self.config.spectrogram_num_sec * self.config.sample_rate
+        )
+
+        input_shape = torch.Size(
+            (1, self.config.n_mels, 1 + spec_num_samples // self.config.hop_length)
+        )
 
         # set up the conv blocks
         self.conv_blocks = nn.ModuleList()
         current_shape = input_shape
-        for i, dims in enumerate(conv_layer_dims):
+        for i, dims in enumerate(self.config.conv_layer_dims):
             in_ch, out_ch = dims
             kernel_size = (1, 3) if i % 2 == 0 else (3, 1)
 
             h_conv = self.conv_output_dim(
-                current_shape[1], kernel_size[0], stride, padding
+                current_shape[1],
+                kernel_size[0],
+                self.config.kernel_stride,
+                self.config.kernel_padding,
             )
             w_conv = self.conv_output_dim(
-                current_shape[2], kernel_size[1], stride, padding
+                current_shape[2],
+                kernel_size[1],
+                self.config.kernel_stride,
+                self.config.kernel_padding,
             )
-            h_pool = self.pool_output_dim(h_conv, pool_kernel_size, pool_kernel_size)
-            w_pool = self.pool_output_dim(w_conv, pool_kernel_size, pool_kernel_size)
+            h_pool = self.pool_output_dim(
+                h_conv, self.config.pool_kernel_size, self.config.pool_kernel_size
+            )
+            w_pool = self.pool_output_dim(
+                w_conv, self.config.pool_kernel_size, self.config.pool_kernel_size
+            )
 
             layers = [
                 nn.Conv2d(
                     in_ch,
                     out_ch,
                     kernel_size=kernel_size,
-                    stride=stride,
-                    padding=padding,
+                    stride=self.config.kernel_stride,
+                    padding=self.config.kernel_padding,
                 ),
                 nn.BatchNorm2d(out_ch),
                 nn.ELU(),
             ]
 
-            if h_pool > minimum_dims[0] and w_pool > minimum_dims[1]:
-                layers.append(nn.MaxPool2d(kernel_size=pool_kernel_size))
+            if h_pool > self.config.min_dims[0] and w_pool > self.config.min_dims[1]:
+                layers.append(nn.MaxPool2d(kernel_size=self.config.pool_kernel_size))
                 current_shape = (out_ch, h_pool, w_pool)
             else:
                 current_shape = (out_ch, h_conv, w_conv)
@@ -60,31 +72,34 @@ class EncoderNet(nn.Module):
         # flatten the tensor before passing it to the divide-and-encode block
         self.flatten = nn.Flatten()
         _, h, w = current_shape
-        conv_out_dim = conv_layer_dims[-1][1] * h * w
+        conv_out_dim = self.config.conv_layer_dims[-1][1] * h * w
 
         # set up the divide and encode block
-        assert embedding_dim % num_branches == 0
-        embedding_dim_per_branch = embedding_dim // num_branches
+        assert self.config.embedding_dim % self.config.num_branches == 0
+        embedding_dim_per_branch = self.config.embedding_dim // self.config.num_branches
         self.divide_and_encode = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Linear(conv_out_dim, divide_and_encode_hidden_dim),
+                    nn.Linear(conv_out_dim, self.config.divide_and_encode_hidden_dim),
                     nn.ELU(),
-                    nn.BatchNorm1d(divide_and_encode_hidden_dim),
-                    nn.Linear(divide_and_encode_hidden_dim, embedding_dim_per_branch),
+                    nn.BatchNorm1d(self.config.divide_and_encode_hidden_dim),
+                    nn.Linear(
+                        self.config.divide_and_encode_hidden_dim,
+                        embedding_dim_per_branch,
+                    ),
                 )
-                for _ in range(num_branches)
+                for _ in range(self.config.num_branches)
             ]
         )
-        self.num_branches = num_branches
+        self.num_branches = self.config.num_branches
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, input_tensors: torch.Tensor):
         for block in self.conv_blocks:
-            x = block(x)
+            input_tensors = block(input_tensors)
 
-        x = self.flatten(x)
+        input_tensors = self.flatten(input_tensors)
 
-        splits = [fc(x) for fc in self.divide_and_encode]
+        splits = [fc(input_tensors) for fc in self.divide_and_encode]
         out = torch.cat(splits, dim=1)
 
         return out
@@ -97,14 +112,13 @@ class EncoderNet(nn.Module):
 
 
 if __name__ == "__main__":
-    from sample_hunter._util import WINDOW_NUM_SAMPLES, DEVICE, INPUT_SHAPE
-    from torchsummary import summary
+    pass
 
-    model = EncoderNet(
-        input_shape=INPUT_SHAPE,
-    ).to(DEVICE)
+    # model = EncoderNet(
+    #     config=EncoderNetConfig(),
+    # ).to(DEVICE)
 
-    summary(model=model, input_size=INPUT_SHAPE, device=DEVICE)
+    # summary(model=model, input_size=INPUT_SHAPE, device=DEVICE)
 
     """
     

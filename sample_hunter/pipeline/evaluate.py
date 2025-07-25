@@ -2,15 +2,17 @@ import torch.nn as nn
 import torch
 from torch.utils.data import DataLoader
 
+from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN
+
 from .data_loading import flatten_sub_batches
 from .triplet_loss import triplet_accuracy, mine_negative_triplet
-from sample_hunter._util import config, DEVICE
+from sample_hunter._util import DEVICE
 
 
 def evaluate(
     model: nn.Module,
     dataloader: DataLoader,
-    alpha: float = config.network.alpha,
+    alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN,
     device: str = DEVICE,
 ) -> float:
     """
@@ -47,8 +49,8 @@ def evaluate_batch(
     positive: torch.Tensor,
     song_ids: torch.Tensor,
     anchor: torch.Tensor,
-    alpha: float,
-    device: str,
+    alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN,
+    device: str = DEVICE,
     debug: bool = False,
 ) -> float | torch.Tensor:
     """

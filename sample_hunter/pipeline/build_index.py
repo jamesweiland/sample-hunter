@@ -17,16 +17,17 @@ from .data_loading import (
     load_tensor_from_bytes,
     load_webdataset,
 )
-from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
+from .transformations.preprocessor import Preprocessor
 from .encoder_net import EncoderNet
-from sample_hunter._util import config, HF_TOKEN, DEVICE, load_model
+from sample_hunter._util import HF_TOKEN, DEVICE, load_model
+from sample_hunter.config import DEFAULT_EMBEDDING_DIM
 
 
 def build_index(
     model: EncoderNet,
     dataset: wds.WebDataset | Dict[str, wds.WebDataset],
-    embedding_dim: int = config.network.embedding_dim,
-    source_batch_size: int = config.network.source_batch_size,
+    embedding_dim: int = DEFAULT_EMBEDDING_DIM,
+    batch_size: int = 200,
     device: str = DEVICE,
 ) -> Tuple[faiss.IndexFlatL2, pd.DataFrame]:
     """
@@ -39,7 +40,7 @@ def build_index(
         index = faiss.IndexFlatL2(embedding_dim)
         metadata = pd.DataFrame(columns=["song_id", "snippet_id", "song_title"])
 
-        with SpectrogramPreprocessor() as preprocessor:
+        with Preprocessor() as preprocessor:
 
             def map_fn(ex):
                 audio, sr = load_tensor_from_bytes(ex["a.mp3"])
@@ -52,7 +53,9 @@ def build_index(
                 keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
 
                 specs = torch.cat([song["specs"] for song in batch], dim=0)
-                collated_list = collate_spectrograms((specs, keys), shuffle=False)
+                collated_list = collate_spectrograms(
+                    (specs, keys), sub_batch_size=2_000, shuffle=False
+                )
 
                 # we have to do titles separately as there's no way to convert
                 # strings to tensors
@@ -78,7 +81,7 @@ def build_index(
                 dataloaders = [
                     torch.utils.data.DataLoader(
                         d.map(map_fn),
-                        batch_size=source_batch_size,
+                        batch_size=batch_size,
                         collate_fn=collate_fn,
                     )
                     for _, d in dataset.items()
@@ -86,7 +89,7 @@ def build_index(
             else:
                 dataloaders = [
                     torch.utils.data.DataLoader(
-                        dataset.map(map_fn), batch_size=source_batch_size, collate_fn=collate_fn  # type: ignore
+                        dataset.map(map_fn), batch_size=batch_size, collate_fn=collate_fn  # type: ignore
                     )
                 ]
 
@@ -157,7 +160,7 @@ def parse_args() -> argparse.Namespace:
         "--repo-id",
         type=str,
         help="The name of the HF dataset to use to generate embeddings",
-        default=config.hf.repo_id,
+        default="samplr/songs",
     )
 
     parser.add_argument("--token", type=str, help="Your HF token", default=HF_TOKEN)

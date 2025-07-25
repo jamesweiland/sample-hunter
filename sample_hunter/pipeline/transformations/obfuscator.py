@@ -1,26 +1,19 @@
-from functools import cached_property
 import math
 import random
-import torch
-from pydantic import BaseModel, field_validator
-from typing import Sequence, Tuple
-
 import torchaudio
+import torch
 
+from functools import cached_property
+
+from .functional import resize
 from .my_musan import MusanException, MyMusan
-from .functional import (
-    create_windows,
-    mix_channels,
-    remove_low_volume_windows,
-    resample,
-)
-from .tone_generator import ToneGenerator
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
-from sample_hunter._util import WINDOW_NUM_SAMPLES, config, DEVICE
+from sample_hunter._util import DEVICE
+from sample_hunter.config import ObfuscatorConfig
 
 
-class Obfuscator(BaseModel):
+class Obfuscator:
     """
     A callable object to obfuscate audio. Randomly distort an audio signal in a variety of ways.
 
@@ -47,81 +40,33 @@ class Obfuscator(BaseModel):
         `device`: either 'cuda' or 'cpu'
     """
 
-    time_stretch_factors: Sequence[float] = (
-        config.preprocess.obfuscator.time_stretch_factors
-    )
-    pitch_factors: Sequence[float] = config.preprocess.obfuscator.pitch_factors
-    lowpass_range: Tuple[int, int] = config.preprocess.obfuscator.lowpass_range
-    highpass_range: Tuple[int, int] = config.preprocess.obfuscator.highpass_range
-    whitenoise_range: Tuple[float, float] = (
-        config.preprocess.obfuscator.whitenoise_range
-    )
-    musan_noise_range: Tuple[float, float] = (
-        config.preprocess.obfuscator.musan_noise_range
-    )
-    num_tones_to_add: int = config.preprocess.obfuscator.num_tones_to_add
-    tone_gen_frequency_range: Tuple[int, int] = (
-        config.preprocess.obfuscator.tone_gen_frequency_range
-    )
-    tone_gen_amplitude_range: Tuple[float, float] = (
-        config.preprocess.obfuscator.tone_gen_amplitude_range
-    )
-    tone_gen_duration_range: Tuple[float, float] = (
-        config.preprocess.obfuscator.tone_gen_duration_range
-    )
-    lowpass_frac: float = config.preprocess.obfuscator.lowpass_frac
-    device: str = DEVICE
-    sample_rate: int = config.preprocess.sample_rate
-    n_fft: int = config.preprocess.n_fft
-    hop_length: int = config.preprocess.hop_length
+    def __init__(
+        self, config: ObfuscatorConfig | None = None, device: str = DEVICE, **kwargs
+    ):
+        self.config = config or ObfuscatorConfig()
+        self.config = self.config.merge_kwargs(**kwargs)
+        self.device = device
 
     @cached_property
     def musan(self) -> MyMusan:
-        return MyMusan(config.paths.musan, subset="music")
-
-    # this is probably deprecated but i'm gonna keep it here just in case
-    @cached_property
-    def tone_gen(self) -> ToneGenerator:
-        return ToneGenerator(self.sample_rate)
+        return MyMusan(self.config.musan, subset="music")
 
     @cached_property
     def time_stretch_perturbation(self) -> BatchedTimeStretchPerturbation:
         return BatchedTimeStretchPerturbation(
-            factors=self.time_stretch_factors,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            num_workers=len(self.time_stretch_factors),
+            factors=self.config.time_stretch_factors,
+            num_workers=len(self.config.time_stretch_factors),
             device=self.device,
         )
 
     @cached_property
     def pitch_perturbation(self) -> BatchedPitchPerturbation:
         return BatchedPitchPerturbation(
-            sample_rate=self.sample_rate,
-            factors=self.pitch_factors,
+            sample_rate=self.config.sample_rate,
+            factors=self.config.pitch_factors,
             device=self.device,
-            num_workers=len(self.pitch_factors),
+            num_workers=len(self.config.pitch_factors),
         )
-
-    @field_validator(
-        "lowpass_range",
-        "highpass_range",
-        "whitenoise_range",
-    )
-    def check_range(cls, v, field):
-        if len(v) != 2:
-            raise ValueError(f"{field.name} must be a tuple of length 2")
-        if v[0] >= v[1]:
-            raise ValueError(
-                f"In {field.name}, the first value must be smaller than the second value"
-            )
-        return v
-
-    @field_validator("lowpass_frac")
-    def check_fraction(cls, v, field):
-        if not (0 <= v <= 1):
-            raise ValueError(f"{field.name} must be between 0 and 1")
-        return v
 
     def __enter__(self):
         self.time_stretch_perturbation.__enter__()
@@ -139,19 +84,38 @@ class Obfuscator(BaseModel):
         """
         with torch.no_grad():
             batch = batch.contiguous() if not batch.is_contiguous() else batch
+            batch = self.offset(batch)
             batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)
             batch = self.apply_filter(batch)
-            # batch = self.add_noise(batch)
-            # batch = self.generate_tone(batch)
             batch = self.overlay_musan(batch)
             return batch
+
+    def offset(self, signal: torch.Tensor) -> torch.Tensor:
+        """Randomly offset (misalign) every window in the signal"""
+        offsets = torch.randint(
+            -self.config.offset_span_num_samples,
+            self.config.offset_span_num_samples,
+            (signal.shape[0],),
+            device=signal.device,
+        )
+
+        idx = torch.arange(signal.shape[-1], device=signal.device).unsqueeze(0)
+
+        input_indices = idx - offsets.unsqueeze(1)  # broadcast offsets to each batch
+
+        # now, pad input_indices by marking those that are out of bounds, and zero-clamp
+        valid_mask = (input_indices >= 0) & (input_indices < signal.shape[-1])
+        input_indices_clamped = input_indices.clamp(0, signal.shape[-1] - 1)
+        shifted = torch.gather(signal, 1, input_indices_clamped)
+        shifted[~valid_mask] = 0.0
+        return shifted
 
     def apply_filter(self, signal: torch.Tensor) -> torch.Tensor:
         """Apply either a high or low pass filter to `signal`."""
         # generate decisions per snippet in the batch
         lowpass_mask = (
-            torch.rand(signal.shape[0], device=signal.device) < self.lowpass_frac
+            torch.rand(signal.shape[0], device=signal.device) < self.config.lowpass_frac
         ).to(signal.device)
         frequencies = torch.zeros(
             signal.shape[0], dtype=torch.int, device=signal.device
@@ -159,8 +123,8 @@ class Obfuscator(BaseModel):
 
         low_idx = lowpass_mask.nonzero().squeeze(1)
         low_freqs = torch.randint(
-            low=self.lowpass_range[0],
-            high=self.lowpass_range[1] + 1,
+            low=self.config.lowpass_range[0],
+            high=self.config.lowpass_range[1] + 1,
             size=(low_idx.shape[0],),
             device=signal.device,
             dtype=torch.int,
@@ -168,18 +132,18 @@ class Obfuscator(BaseModel):
         frequencies[lowpass_mask] = low_freqs
         high_idx = (~lowpass_mask).nonzero().squeeze(1)
         high_freqs = torch.randint(
-            low=self.highpass_range[0],
-            high=self.highpass_range[1] + 1,
+            low=self.config.highpass_range[0],
+            high=self.config.highpass_range[1] + 1,
             size=(high_idx.shape[0],),
             device=signal.device,
             dtype=torch.int,
         )
         frequencies[~lowpass_mask] = high_freqs
         signal_low = self._lowpass_biquad(
-            signal[lowpass_mask], self.sample_rate, frequencies[lowpass_mask]
+            signal[lowpass_mask], self.config.sample_rate, frequencies[lowpass_mask]
         )
         signal_high = self._highpass_biquad(
-            signal[~lowpass_mask], self.sample_rate, frequencies[~lowpass_mask]
+            signal[~lowpass_mask], self.config.sample_rate, frequencies[~lowpass_mask]
         )
         ob = torch.empty_like(signal, dtype=signal.dtype, device=signal.device)
         ob[lowpass_mask] = signal_low
@@ -243,81 +207,6 @@ class Obfuscator(BaseModel):
         )
         return output.reshape(signal.shape)
 
-    def add_noise(self, signal: torch.Tensor) -> torch.Tensor:
-        """Apply a random amount of noise to `signal`."""
-        noise = torch.randn_like(signal, device=signal.device, dtype=signal.dtype)
-        noise_levels = self.whitenoise_range[0] + (
-            self.whitenoise_range[1] - self.whitenoise_range[0]
-        ) * torch.rand(signal.shape[0], device=signal.device, dtype=torch.float16)
-        return torchaudio.functional.add_noise(
-            waveform=signal, noise=noise, snr=noise_levels.unsqueeze(1)
-        )
-
-    def generate_tone(
-        self,
-        signal: torch.Tensor,
-    ):
-        """
-        Use `ToneGenerator` to generate a tone and add it to `signal`
-
-        signal has shape (B, 1, S), S is number of samples and B is batch size
-
-        This is likely deprecated as we have a model that was trained
-        without it that's pretty good, but i'll keep it here just in case
-        """
-        tone_gens = [
-            self.tone_gen.generate_sine_wave,
-            self.tone_gen.generate_square_wave,
-            self.tone_gen.generate_triangle_wave,
-            self.tone_gen.generate_sawtooth_wave,
-        ]
-        num_waves = len(tone_gens)
-        for _ in range(self.num_tones_to_add):
-            perm = torch.randperm(signal.shape[0])
-            # calculate the inverse permutation so we can restore the original order after
-            inv_perm = torch.empty_like(perm)
-            inv_perm[perm] = torch.arange(signal.shape[0])
-            signal = signal[perm]
-            segments = torch.chunk(signal, num_waves)
-            for i, segment in enumerate(segments):
-                frequencies = torch.randint(
-                    low=self.tone_gen_frequency_range[0],
-                    high=self.tone_gen_frequency_range[1],
-                    size=(segment.shape[0],),
-                )
-                amplitudes = (
-                    self.tone_gen_amplitude_range[1] - self.tone_gen_amplitude_range[0]
-                ) * torch.rand(segment.shape[0]) + self.tone_gen_amplitude_range[0]
-                starts = config.preprocess.spectrogram_width * torch.rand(
-                    segment.shape[0]
-                )
-                ends = torch.clamp(
-                    starts
-                    + (
-                        self.tone_gen_duration_range[1]
-                        - self.tone_gen_duration_range[0]
-                    )
-                    * torch.rand(segment.shape[0])
-                    + self.tone_gen_duration_range[0],
-                    max=config.preprocess.spectrogram_width,
-                )
-                segment = tone_gens[i](
-                    signal=segment,
-                    frequencies=frequencies,
-                    amplitudes=amplitudes,
-                    starts=starts,
-                    ends=ends,
-                )
-                signal[
-                    sum(seg.shape[0] for seg in segments[:i]) : sum(
-                        seg.shape[0] for seg in segments[: i + 1]
-                    )
-                ] = segment
-
-            signal = signal[inv_perm]
-
-        return signal
-
     def overlay_musan(self, signal: torch.Tensor) -> torch.Tensor:
         """
         Overlay random samples from the MUSAN dataset onto `signal`
@@ -332,11 +221,10 @@ class Obfuscator(BaseModel):
 
         # build up a sample of songs from musan
         n = signal.shape[0]
-        sample = torch.empty((0, 1, WINDOW_NUM_SAMPLES), device=signal.device)
-        print(n)
+        window_num_samples = int(self.config.sample_rate * signal.shape[2])
+        sample = torch.empty((0, 1, window_num_samples), device=signal.device)
         while sample.shape[0] < n:
             try:
-                print(sample.shape[0])
                 idx = random.randint(0, len(self.musan) - 1)
                 musan_signal, name = self.musan[idx]
                 sample = torch.cat([sample, musan_signal], dim=0)
@@ -345,8 +233,8 @@ class Obfuscator(BaseModel):
         # in case that now sample has more than signal
         sample = sample[:n]
 
-        noise_levels = self.musan_noise_range[0] + (
-            self.musan_noise_range[1] - self.musan_noise_range[0]
+        noise_levels = self.config.musan_noise_range[0] + (
+            self.config.musan_noise_range[1] - self.config.musan_noise_range[0]
         ) * torch.rand(signal.shape[0], device=signal.device, dtype=torch.float16)
         return torchaudio.functional.add_noise(
             waveform=signal, noise=sample, snr=noise_levels.unsqueeze(1)
@@ -354,48 +242,49 @@ class Obfuscator(BaseModel):
 
 
 if __name__ == "__main__":
-    # listen to obfuscated vs original audio
-    from .spectrogram_preprocessor import SpectrogramPreprocessor
-    from sample_hunter.pipeline.data_loading import load_webdataset
-    from sample_hunter._util import HF_TOKEN
-    from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+    pass
+    # # listen to obfuscated vs original audio
+    # from .spectrogram_preprocessor import SpectrogramPreprocessor
+    # from sample_hunter.pipeline.data_loading import load_webdataset
+    # from sample_hunter._util import HF_TOKEN, play_tensor_audio, plot_spectrogram
+    # from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
 
-    with SpectrogramPreprocessor() as preprocessor:
-        dataset = load_webdataset("samplr/songs", "train", HF_TOKEN)
+    # with SpectrogramPreprocessor() as preprocessor:
+    #     dataset = load_webdataset("samplr/songs", "train", HF_TOKEN)
 
-        def map_fn(ex):
-            # load the audio as tensor form so it can be passed to obfuscator
-            signal, sr = load_tensor_from_bytes(ex["mp3"])
-            # mix to mono
-            signal = mix_channels(signal)
+    #     def map_fn(ex):
+    #         # load the audio as tensor form so it can be passed to obfuscator
+    #         signal, sr = load_tensor_from_bytes(ex["mp3"])
+    #         # mix to mono
+    #         signal = mix_channels(signal)
 
-            # resample to target sampling rate
-            signal = resample(signal, sr, config.preprocess.sample_rate)
+    #         # resample to target sampling rate
+    #         signal = resample(signal, sr, default_config.preprocess.sample_rate)
 
-            signal = create_windows(signal)
+    #         signal = create_windows(signal)
 
-            anchor = remove_low_volume_windows(
-                signal, config.preprocess.volume_threshold
-            )
+    #         anchor = remove_low_volume_windows(
+    #             signal, default_config.preprocess.volume_threshold
+    #         )
 
-            positive = preprocessor.obfuscate_window(anchor)
+    #         positive = preprocessor.obfuscate_window(anchor)
 
-            return {
-                **ex,
-                "anchor": anchor,
-                "positive": positive,
-                "anchor_spec": preprocessor.mel_spectrogram(anchor),
-                "positive_spec": preprocessor.mel_spectrogram(positive),
-            }
+    #         return {
+    #             **ex,
+    #             "anchor": anchor,
+    #             "positive": positive,
+    #             "anchor_spec": preprocessor.mel_spectrogram(anchor),
+    #             "positive_spec": preprocessor.mel_spectrogram(positive),
+    #         }
 
-        dataset = dataset.map(map_fn)
-        for ex in dataset:
-            print(f"Song: {ex["json"]["title"]}\n")
+    #     dataset = dataset.map(map_fn)
+    #     for ex in dataset:
+    #         print(f"Song: {ex["json"]["title"]}\n")
 
-            for i in range(min(ex["anchor"].shape[0], 10)):
-                play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
-                play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
-                plot_spectrogram(ex["anchor_spec"][i], f"anchor {i}")
-                plot_spectrogram(ex["positive_spec"][i], f"positive {i}")
+    #         for i in range(min(ex["anchor"].shape[0], 10)):
+    #             play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
+    #             play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
+    #             plot_spectrogram(ex["anchor_spec"][i], f"anchor {i}")
+    #             plot_spectrogram(ex["positive_spec"][i], f"positive {i}")
 
-            print("--------------------------------------------------")
+    #         print("--------------------------------------------------")

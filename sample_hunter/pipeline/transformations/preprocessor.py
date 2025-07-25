@@ -3,32 +3,24 @@ Custom generator functions to transform/pre-process data that is sitting
 in the huggingface dataset.
 """
 
-import math
 import torch
-import torchaudio
-from typing import Dict, Tuple, Union
-
-from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+from typing import Dict, Tuple, Union, List
 
 
 from .obfuscator import Obfuscator
 from .functional import (
     create_windows,
     mix_channels,
+    offset,
     remove_low_volume_windows,
-    resize,
-    num_windows,
+    resample,
 )
-from sample_hunter._util import (
-    config,
-    DEVICE,
-    MEL_SPECTROGRAM,
-    STEP_NUM_SAMPLES,
-    WINDOW_NUM_SAMPLES,
-)
+from sample_hunter.config import PreprocessConfig
+from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+from sample_hunter._util import DEVICE
 
 
-class SpectrogramPreprocessor:
+class Preprocessor:
     """
     A callable object to transform full songs into trainable spectrograms.
     To be used as the callable when overloading `.map` for an IterableDataset.
@@ -36,14 +28,10 @@ class SpectrogramPreprocessor:
 
     def __init__(
         self,
-        mel_spectrogram: torchaudio.transforms.MelSpectrogram = MEL_SPECTROGRAM,
-        target_sample_rate: int = config.preprocess.sample_rate,
-        volume_threshold: int = config.preprocess.volume_threshold,
-        take_rate: float = config.preprocess.take_rate,
-        window_num_samples: int = WINDOW_NUM_SAMPLES,
-        step_num_samples: int = STEP_NUM_SAMPLES,
-        obfuscator: Obfuscator = Obfuscator(),
+        config: PreprocessConfig | None = None,
+        obfuscator: Obfuscator | None = None,
         device: str = DEVICE,
+        **kwargs,
     ):
         """
         Store the necessary settings for transforming the audio.
@@ -56,23 +44,21 @@ class SpectrogramPreprocessor:
             spectrogram, the second being the obfuscated one
             device: the device to use for torch
         """
-        self.mel_spectrogram = mel_spectrogram
-        self.target_sample_rate = target_sample_rate
-        self.window_num_samples = window_num_samples
-        self.step_num_samples = step_num_samples
+        self.config = config or PreprocessConfig()
+        self.config = self.config.merge_kwargs(**kwargs)
         self.device = device
         self.obfuscator = obfuscator
-        self.vol_threshold = volume_threshold
-        self.take_rate = take_rate
 
     def __enter__(self):
         """Set up the resources for the downstream classes"""
-        self.obfuscator.__enter__()
+        if self.obfuscator is not None:
+            self.obfuscator.__enter__()
         return self
 
     def __exit__(self, *exc):
         """Clean up the downstream resources"""
-        self.obfuscator.__exit__(*exc)
+        if self.obfuscator is not None:
+            self.obfuscator.__exit__(*exc)
 
     def __call__(
         self,
@@ -80,6 +66,7 @@ class SpectrogramPreprocessor:
         train: bool = False,
         target_length: int | None = None,
         sample_rate: int | None = None,
+        **kwargs,
     ):
         """
         Transform `data` into a mel spectrogram.
@@ -88,6 +75,8 @@ class SpectrogramPreprocessor:
         first being the obfuscated data, the second being the anchor.
 
         `sample_rate` must be provided if a `torch.Tensor` is passed.
+
+        **kwargs can be used to change the parameters at call-time
         """
         with torch.no_grad():
             if isinstance(data, Dict):
@@ -113,6 +102,7 @@ class SpectrogramPreprocessor:
                 sample_rate=sample_rate,  # type: ignore
                 train=train,
                 target_length=target_length,
+                **kwargs,
             )
 
     def transform(
@@ -121,7 +111,8 @@ class SpectrogramPreprocessor:
         sample_rate: int,
         train: bool = False,
         target_length: int | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+        **kwargs,
+    ) -> Tuple[torch.Tensor, torch.Tensor] | List[torch.Tensor]:
         """
         Perform the necessary pre-processing
         operations from a huggingface Audio object
@@ -130,50 +121,61 @@ class SpectrogramPreprocessor:
 
         Expects a tensor with shape (N, S), N=num_channels, S=num_samples
         The tensor that is returned has shape (num_windows, num_channels, n_mels, time_frames)
+
+        **kwargs can be used to change the parameters at call-time
         """
+        config = self.config.merge_kwargs(**kwargs)
 
         # mix to mono
         signal = mix_channels(signal)
 
         # resample to target sampling rate
-        signal = self.resample(signal, sample_rate)
+        signal = resample(signal, sample_rate, config.sample_rate)
 
         if train:
             # make windows without overlay for training
             signal = create_windows(
                 signal,
                 target_length=target_length,
-                window_num_samples=self.window_num_samples,
-                step_num_samples=self.window_num_samples,
+                window_num_samples=config.spec_num_samples,
+                step_num_samples=config.spec_num_samples,
             )
 
-            signal = remove_low_volume_windows(signal, vol_threshold=self.vol_threshold)
+            signal = remove_low_volume_windows(
+                signal, vol_threshold=config.spec_num_samples
+            )
 
-            if self.take_rate < 1.0:
-                # take only a fraction of windows from the song
-                k = math.ceil(signal.shape[0] * self.take_rate)
-                idx = torch.randperm(signal.shape[0])[:k]
-                signal = signal[idx]
+            anchor = config.mel_spectrogram(signal)
+            positive = config.mel_spectrogram(self.obfuscate_window(signal))
 
-            anchor = self.mel_spectrogram(signal)
-
-            positive = self.mel_spectrogram(self.obfuscate_window(signal))
             return positive, anchor
         else:
-            # make windows with overlay
-            signal = create_windows(
-                signal,
-                target_length=target_length,
-                window_num_samples=self.window_num_samples,
-                step_num_samples=self.step_num_samples,
+            # make a list of audio signals that are offset from
+            # -offset_span to offset_span, stepped through by offset_step
+            offsets = offset(
+                signal, config.offset_span_num_samples, config.offset_step_num_samples
             )
 
-            signal = remove_low_volume_windows(signal, vol_threshold=self.vol_threshold)
+            # make windows with overlay
+            offsets = [
+                create_windows(
+                    offset,
+                    target_length=target_length,
+                    window_num_samples=config.spec_num_samples,
+                    step_num_samples=config.step_num_samples,
+                )
+                for offset in offsets
+            ]
 
-            anchor = self.mel_spectrogram(signal)
+            offsets = [
+                remove_low_volume_windows(offset, vol_threshold=config.volume_threshold)
+                for offset in offsets
+            ]
+
+            anchors = [config.mel_spectrogram(offset) for offset in offsets]
 
             # if not train, just return the regular transformation
-            return anchor
+            return anchors
 
     def obfuscate_window(self, signal: torch.Tensor) -> torch.Tensor:
         """
@@ -189,14 +191,7 @@ class SpectrogramPreprocessor:
             the obfuscation time-distorted the tensor, it will be truncated
             or padded to match the exact shape of the input
         """
+        if self.obfuscator is None:
+            self.obfuscator = Obfuscator()
         ob_sig = self.obfuscator(signal)
         return ob_sig
-
-    def resample(self, signal: torch.Tensor, sample_rate: int) -> torch.Tensor:
-        if sample_rate != self.target_sample_rate:
-            torch.set_num_threads(1)
-            signal = torchaudio.functional.resample(
-                signal, sample_rate, self.target_sample_rate
-            )
-            torch.set_num_threads(torch.multiprocessing.cpu_count())
-        return signal
