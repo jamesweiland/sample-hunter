@@ -4,45 +4,15 @@ import sys
 import multiprocessing
 import threading
 import torch
-import torchaudio
-from torchaudio.transforms import AmplitudeToDB
-from torch import Tensor
-import matplotlib.pyplot as plt
 from typing import Any
 from abc import ABC, abstractmethod
-import sounddevice as sd
 
 import pandas as pd
 
-from sample_hunter.config import set_config_path, get_config
-
-CONFIG_PATH: Path = Path("configs/7_19_2025.yaml")
-set_config_path(Path(CONFIG_PATH))
-config = get_config()
-
-WINDOW_NUM_SAMPLES: int = int(
-    config.preprocess.sample_rate * config.preprocess.spectrogram_width
-)  # 2 seconds per window
-STEP_NUM_SAMPLES: int = int(
-    config.preprocess.sample_rate * config.preprocess.step_length
-)  # 1 second overlay between windows
-INPUT_SHAPE: torch.Size = torch.Size(
-    (
-        1,
-        config.preprocess.n_mels,
-        1 + WINDOW_NUM_SAMPLES // config.preprocess.hop_length,
-    )
-)
+from sample_hunter.config import EncoderNetConfig, DEFAULT_SAMPLE_RATE
 
 
 DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
-MEL_SPECTROGRAM = torchaudio.transforms.MelSpectrogram(
-    sample_rate=config.preprocess.sample_rate,
-    n_fft=config.preprocess.n_fft,
-    hop_length=config.preprocess.hop_length,
-    n_mels=config.preprocess.n_mels,
-).to(DEVICE)
-
 PROCS: int = multiprocessing.cpu_count()
 HF_TOKEN: str = os.environ.get("HF_TOKEN", "")
 
@@ -53,8 +23,11 @@ DEFAULT_RETRIES: int = 5
 DEFAULT_RETRY_DELAY: float = 5.0
 
 
-def load_model(model_path: Path):
+def load_model(model_path: Path | str, config: EncoderNetConfig | None = None):
+    """Load a .pth file that is saved locally on disk into the EncoderNet architecture"""
     from sample_hunter.pipeline.encoder_net import EncoderNet
+
+    config = config or EncoderNetConfig()
 
     if DEVICE == "cuda":
         state_dict = torch.load(model_path, weights_only=False)
@@ -62,13 +35,16 @@ def load_model(model_path: Path):
         state_dict = torch.load(
             model_path, weights_only=False, map_location=torch.device("cpu")
         )
-    model = EncoderNet().to(DEVICE)
+    model = EncoderNet(config).to(DEVICE)
     model.load_state_dict(state_dict)
     return model
 
 
-def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
+def plot_spectrogram(tensor: torch.Tensor, title: str = "Spectrogram"):
     """Plot a torch Tensor as a spectrogram"""
+    import matplotlib.pyplot as plt
+    from torchaudio.transforms import AmplitudeToDB
+
     tensor = tensor.squeeze().cpu()
     tensor = AmplitudeToDB()(tensor)
 
@@ -84,10 +60,12 @@ def plot_spectrogram(tensor: Tensor, title: str = "Spectrogram"):
 def play_tensor_audio(
     tensor: torch.Tensor,
     message: str | None = None,
-    sample_rate=config.preprocess.sample_rate,
+    sample_rate=DEFAULT_SAMPLE_RATE,
     max_sec: int | None = None,
 ):
     """Halt script execution to play a tensor as audio"""
+    import sounddevice as sd
+
     # tensor: shape (1, T) or (T,)
     arr = tensor.cpu().numpy()
     if arr.ndim == 2:

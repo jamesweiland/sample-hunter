@@ -4,19 +4,26 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
-from typing import Callable, Tuple
+from typing import Callable, Tuple, cast
 import argparse
 from pathlib import Path
 from tqdm import tqdm
+import webdataset as wds
 
 from .data_loading import load_webdataset
 from .encoder_net import EncoderNet
 from .data_loading import collate_spectrograms, flatten_sub_batches
-from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
+from .transformations.obfuscator import Obfuscator
+from .transformations.preprocessor import Preprocessor
 from .triplet_loss import triplet_accuracy, mine_negative_triplet
 from .evaluate import evaluate
+from sample_hunter.config import (
+    PreprocessConfig,
+    TrainConfig,
+    ObfuscatorConfig,
+    DEFAULT_REPO_ID,
+)
 from sample_hunter._util import (
-    config,
     DEVICE,
     HF_TOKEN,
     load_model,
@@ -198,25 +205,27 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--config",
+        type=Path,
+        help="The path to a configuration file to instantiate the EncoderNetConfig and TrainConfig",
+    )
+
+    parser.add_argument(
         "--from",
         dest="from_",
         type=Path,
         help="Option to load in a model to continue training instead of starting a new model",
     )
 
-    tensorboard = parser.add_argument_group("tensorboard")
-    tensorboard.add_argument(
-        "--log-dir",
-        type=Path,
-        help="The path to the log directory for tensorboard",
-        default=config.paths.log_dir,
+    hf = parser.add_argument_group("hf")
+    hf.add_argument(
+        "--token", type=str, help="Your huggingface token", default=HF_TOKEN
     )
-    tensorboard.add_argument(
-        "--tensorboard",
-        help="Specify whether to write tensorboard data per batch, epoch, or not at all",
+    hf.add_argument(
+        "--repo-id",
         type=str,
-        choices=["none", "batch", "epoch"],
-        default="none",
+        default=DEFAULT_REPO_ID,
+        help="The huggingface repository to use as a training dataset",
     )
 
     dev = parser.add_argument_group("dev")
@@ -241,7 +250,18 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    with SpectrogramPreprocessor() as preprocessor:
+    if args.config:
+        preprocess_config = PreprocessConfig.from_yaml(args.config)
+        train_config = TrainConfig.from_yaml(args.config)
+        obfuscator_config = ObfuscatorConfig.from_yaml(args.config)
+    else:
+        preprocess_config = PreprocessConfig()
+        train_config = TrainConfig()
+        obfuscator_config = ObfuscatorConfig()
+
+    with Preprocessor(
+        preprocess_config, obfuscator=Obfuscator(obfuscator_config)
+    ) as preprocessor:
 
         def map_fn(ex):
             try:
@@ -264,27 +284,28 @@ if __name__ == "__main__":
 
             anchors = torch.cat([song["anchor"] for song in songs], dim=0)
             positives = torch.cat([song["positive"] for song in songs], dim=0)
-            sub_batches = collate_spectrograms((anchors, positives, keys))
+            sub_batches = collate_spectrograms(
+                (anchors, positives, keys), train_config.sub_batch_size
+            )
 
             return [(anchor, positive, k) for anchor, positive, k in sub_batches]
 
-        train_dataset = load_webdataset(config.hf.repo_id, "train", args.token).map(
-            map_fn
-        )
+        train_dataset = cast(
+            wds.WebDataset, load_webdataset(args.repo_id, "train", args.token)
+        ).map(map_fn)
+        test_dataset = cast(
+            wds.WebDataset, load_webdataset(args.repo_id, "test", args.token)
+        ).map(map_fn)
 
         train_dataloader = DataLoader(
             train_dataset,
-            batch_size=config.network.source_batch_size,
+            batch_size=train_config.source_batch_size,
             collate_fn=collate_fn,
-        )
-
-        test_dataset = load_webdataset(config.hf.repo_id, "test", args.token).map(
-            map_fn
         )
 
         test_dataloader = DataLoader(
             test_dataset,
-            batch_size=config.network.source_batch_size,
+            batch_size=train_config.source_batch_size,
             collate_fn=collate_fn,
         )
 
@@ -303,33 +324,31 @@ if __name__ == "__main__":
                 )
 
             epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
-            if epochs_already_trained >= config.network.num_epochs:
+            if epochs_already_trained >= train_config.num_epochs:
                 raise ValueError(
                     "The model has already been trained for more epochs than specified in the config for num_epochs\n"
                     f"Epochs already trained: {epochs_already_trained}\n"
-                    f"Config num_epochs: {config.network.num_epochs}"
+                    f"Config num_epochs: {train_config.num_epochs}"
                 )
 
             model = load_model(args.from_)
-            num_epochs = range(
-                epochs_already_trained + 1, config.network.num_epochs + 1
-            )
+            num_epochs = range(epochs_already_trained + 1, train_config.num_epochs + 1)
         elif args.from_:
             if not args.from_.exists():
                 raise ValueError(f"--from not found: {args.from_}")
 
             model = load_model(args.from_)
-            num_epochs = range(1, config.network.num_epochs + 1)
+            num_epochs = range(1, train_config.num_epochs + 1)
         else:
             # make a new model
             model = EncoderNet().to(DEVICE)
-            num_epochs = range(1, config.network.num_epochs + 1)
+            num_epochs = range(1, train_config.num_epochs + 1)
 
         save_per_epoch = args.out if args.save_per_epoch else None
 
         model = EncoderNet().to(DEVICE)
 
-        adam = torch.optim.Adam(model.parameters(), lr=config.network.learning_rate)
+        adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
         triplet_loss = nn.TripletMarginLoss()
 
         train(
@@ -338,11 +357,11 @@ if __name__ == "__main__":
             test_dataloader=test_dataloader,
             optimizer=adam,
             loss_fn=triplet_loss,
-            log_dir=args.log_dir,
-            tensorboard=args.tensorboard,
+            log_dir=train_config.tensorboard_log_dir,
+            tensorboard=train_config.tensorboard,
             device=DEVICE,
             num_epochs=num_epochs,
-            alpha=config.network.alpha,
+            alpha=train_config.alpha,
             save_per_epoch=save_per_epoch,
         )
 

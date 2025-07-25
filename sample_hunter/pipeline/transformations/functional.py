@@ -2,19 +2,19 @@
 Utility functions used for transforming the audio into a trainable form
 """
 
-from typing import Tuple, Generator
+from typing import Tuple, Generator, List
 import warnings
 import torch
 import torch
 import torchaudio
 
-from sample_hunter._util import DEVICE, STEP_NUM_SAMPLES, WINDOW_NUM_SAMPLES
+from sample_hunter._util import DEVICE
 
 
 def num_windows(
     length: int,
-    window_size: int = WINDOW_NUM_SAMPLES,
-    step_size: int = STEP_NUM_SAMPLES,
+    window_size: int,
+    step_size: int,
 ) -> int:
     """Count the number of windows that a tensor with length would produce
     for the given window and step size."""
@@ -35,7 +35,7 @@ def resize(signal: torch.Tensor, desired_length: int) -> torch.Tensor:
     if signal.shape[-1] < desired_length:
         num_missing_samples = desired_length - signal.shape[-1]
         return torch.nn.functional.pad(signal, (0, num_missing_samples))
-    if signal.shape[-1] > desired_length:
+    elif signal.shape[-1] > desired_length:
         return signal[..., :desired_length]
     return signal
 
@@ -110,14 +110,35 @@ def remove_low_volume_windows(signal: torch.Tensor, vol_threshold: int) -> torch
     return signal[signals_above_threshold]
 
 
+def offset(
+    signal: torch.Tensor, span_num_samples: int, step_num_samples: int
+) -> List[torch.Tensor]:
+    """
+    Offset signal, which is a tensor with shape (1, S), where S is number of samples,
+    from -span_num_samples to span_num_samples, stepped through by step_num_samples
+    """
+
+    results = []
+    for offset_num_samples in range(
+        -span_num_samples, span_num_samples + step_num_samples, step_num_samples
+    ):
+        if offset_num_samples < 0:
+            offset = signal[:, abs(offset_num_samples) :]
+        elif offset_num_samples > 0:
+            offset = torch.nn.functional.pad(signal, (offset_num_samples, 0))
+        else:
+            offset = signal
+        results.append(offset)
+    return results
+
+
 def create_windows(
     signal: torch.Tensor,
+    window_num_samples: int,
+    step_num_samples: int,
     target_length: int | None = None,
-    window_num_samples: int = WINDOW_NUM_SAMPLES,
-    step_num_samples: int = STEP_NUM_SAMPLES,
     device: str = DEVICE,
 ) -> torch.Tensor:
-
     if target_length is None:
         # Default behavior
 
@@ -152,7 +173,7 @@ def create_windows(
     # if n_windows is specified, do per-window padding to reach the target length
 
     proportion = signal.shape[1] / target_length
-    n_windows = num_windows(target_length)
+    n_windows = num_windows(target_length, window_num_samples, step_num_samples)
     windows = []
     start = 0
     for _ in range(n_windows - 1):

@@ -9,12 +9,12 @@ from pathlib import Path
 import torch
 from typing import Dict, List, Tuple, Generator
 from huggingface_hub import HfApi
-from datasets import load_dataset, IterableDataset, IterableDatasetDict
 import torchaudio
 import webdataset as wds
 import re
 
-from sample_hunter._util import HF_TOKEN, config
+from sample_hunter._util import HF_TOKEN
+from sample_hunter.config import DEFAULT_CACHE_DIR
 
 
 def load_tensor_from_bytes(initial_bytes: Buffer) -> Tuple[torch.Tensor, int]:
@@ -50,8 +50,8 @@ def flatten_sub_batches(
 
 def collate_spectrograms(
     batch: torch.Tensor | Tuple[torch.Tensor, ...],
+    sub_batch_size: int,
     shuffle: bool = True,
-    sub_batch_size: int = config.network.sub_batch_size,
 ) -> Tuple[torch.Tensor, ...] | List[Tuple[torch.Tensor, ...]]:
     """
     Collate a batch of mappings of transformed tensors before passing to the dataloader.
@@ -114,7 +114,7 @@ def load_webdataset(
     repo_id: str,
     split: str | List[str],
     token: str = HF_TOKEN,
-    cache_dir: Path = config.paths.cache_dir,
+    cache_dir: Path = DEFAULT_CACHE_DIR,
 ) -> wds.WebDataset | Dict[str, wds.WebDataset]:
     """load a webdataset of a split containing tarfiles like {split}-{i:0nd}.tar, where n is some
     arbitary 0 padding, for all i found in the split."""

@@ -1,16 +1,18 @@
 """Use a built FAISS index to make predictions about song snippets."""
 
 import argparse
-from typing import Tuple
+from typing import Tuple, List
 import faiss
 import torch
 import pandas as pd
 from pathlib import Path
+from tqdm import tqdm
 
 from .data_loading import load_tensor_from_bytes, load_webdataset
-from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
+from .transformations.preprocessor import Preprocessor
 from .encoder_net import EncoderNet
-from sample_hunter._util import config, HF_TOKEN, load_model, play_tensor_audio
+from sample_hunter._util import HF_TOKEN, load_model
+from sample_hunter.config import PostprocessConfig, DEFAULT_TOP_K
 
 
 def validate_vector_search(
@@ -19,14 +21,14 @@ def validate_vector_search(
     model: EncoderNet,
     metadata: pd.DataFrame,
     gt: int,
-    k: int = config.post.k,
+    top_k: int = DEFAULT_TOP_K,
 ) -> bool:
     """Returns True if gt is in the vector search for the spectrogram, False otherwise"""
     with torch.no_grad():
         model.eval()
 
         embeddings = model(spectrogram)
-        D, I = index.search(embeddings, k)
+        D, I = index.search(embeddings, top_k)  # type: ignore
         for neighbors in I:
             for neighbor in neighbors:
                 song_id = metadata[metadata["snippet_id"] == neighbor][
@@ -37,72 +39,109 @@ def validate_vector_search(
         return False
 
 
-def predict(
-    spectrogram: torch.Tensor,
-    index: faiss.IndexFlatL2,
-    model: EncoderNet,
+def infer_with_offset(
+    embeddings: List[torch.Tensor],
+    index: faiss.Index,
     metadata: pd.DataFrame,
     gt: int | None = None,
+    config: PostprocessConfig | None = None,
+    **kwargs,
+) -> Tuple[int, float]:
+    """
+    Given a list of embeddings that represent an audio sample offset a certain number of times,
+    find the best match across all offsets
+    """
+
+    candidates = {}
+    for embedding in tqdm(embeddings):
+        candidate, score = infer(
+            embeddings=embedding,
+            index=index,
+            metadata=metadata,
+            config=config,
+            **kwargs,
+        )
+        if (
+            candidate in candidates and candidates[candidate] < score
+        ) or candidate not in candidates:
+            candidates[candidate] = score
+
+    best_candidate = max(candidates, key=candidates.get)  # type: ignore
+    best_score = candidates[best_candidate]
+
+    if gt:
+        if gt in candidates.keys():
+            print("The correct song WAS a candidate")
+            print(f"The correct song had a score of {candidates[gt]}")
+        else:
+            print("The correct song WAS NOT a candidate")
+
+    return best_candidate, best_score
+
+
+def infer(
+    embeddings: torch.Tensor,
+    index: faiss.Index,
+    metadata: pd.DataFrame,
+    config: PostprocessConfig | None = None,
+    **kwargs,
 ) -> Tuple[int, float]:
     """
     Predict embeddings of a spectrogram, then query the index to find
     the nearest neighbors of the spectrogram and use that to make a
     prediction about where the spectrogram was sampled from.
 
-    spectrogram: a tensor of shape (B?, 1, M, T), where B is (optional) batch
-    size, M is number of mel bins, and T is number of time frames.
+    spectrogram: a tensor of shape (B?, E), where B is (optional) batch
+    size, E is embedding dimension
     If B is given, `predict` will find the nearest neighbor for every
     spectrogram in the batch and return the song id with the most near neighbors
     """
 
-    with torch.no_grad():
-        model.eval()
-        embeddings = model(spectrogram)
-        D, I = index.search(embeddings, 1)
+    config = config or PostprocessConfig()
+    config = config.merge_kwargs(**kwargs)
 
-        I = I.squeeze(1)
-        D = D.squeeze(1)
+    with torch.no_grad():
+        D, I = index.search(embeddings, config.top_k)  # type: ignore
 
         # create a list of candidate songs from the index
         candidates = {}
-        for neighbor in I:
-            song_id = metadata[metadata["snippet_id"] == neighbor]["song_id"]
-            assert len(song_id) == 1
-            song_id = int(song_id.iloc[0])
-            if song_id not in candidates.keys():
-                # first, gather all embedding ids related to the song and retrieve them from index
-                song_snippets = metadata[metadata["song_id"] == song_id].sort_values(
-                    "snippet_order"
-                )
-                snippet_ids = torch.tensor(
-                    song_snippets["snippet_id"].tolist(), device=embeddings.device
-                )
-                candidate = torch.tensor(
-                    index.reconstruct_batch(snippet_ids),
-                    dtype=embeddings.dtype,
-                    device=embeddings.device,
-                )
+        for query_idx in range(I.shape[0]):
+            for neighbor_idx in range(I.shape[1]):
+                neighbor = I[query_idx][neighbor_idx]
 
-                candidates.update(
-                    {
-                        song_id: evaluate_candidate(
-                            query_sequence=embeddings,
-                            candidate_song=candidate,
-                            candidate_song_id=song_id,
-                            index=index,
-                            metadata=metadata,
-                        ),
-                    }
-                )
+                song_id = metadata[metadata["snippet_id"] == neighbor]["song_id"]
+                assert len(song_id) == 1
+                song_id = int(song_id.iloc[0])
+                if song_id not in candidates.keys():
+                    # first, gather all embedding ids related to the song and retrieve them from index
+                    song_snippets = metadata[
+                        metadata["song_id"] == song_id
+                    ].sort_values("snippet_order")
+                    snippet_ids = torch.tensor(
+                        song_snippets["snippet_id"].tolist(), device=embeddings.device
+                    )
+                    candidate = torch.tensor(
+                        index.reconstruct_batch(snippet_ids),  # type: ignore
+                        dtype=embeddings.dtype,
+                        device=embeddings.device,
+                    )
 
-        best_candidate = max(candidates, key=candidates.get)
+                    candidates.update(
+                        {
+                            song_id: evaluate_candidate(
+                                query_sequence=embeddings,
+                                candidate_song=candidate,
+                                candidate_song_id=song_id,
+                                index=index,
+                                metadata=metadata,
+                                config=config,
+                            ),
+                        }
+                    )
+
+        best_candidate = max(candidates, key=candidates.get)  # type: ignore
         best_score = candidates[best_candidate]
-        if gt:
-            if gt in candidates.keys():
-                print("The correct song WAS a candidate")
-                print(f"The correct song had a score of {candidates[gt]}")
-            else:
-                print("The correct song WAS NOT a candidate")
+
         return best_candidate, best_score
 
 
@@ -112,10 +151,7 @@ def evaluate_candidate(
     candidate_song_id: int,
     index: faiss.Index,
     metadata: pd.DataFrame,
-    span: float = config.post.span,
-    step: float = config.post.step,
-    alpha: float = config.post.alpha,
-    sample_rate: int = config.preprocess.sample_rate,
+    config: PostprocessConfig | None = None,
 ) -> float:
     """
     Slide the query sequence over the candidate song and find the sequence in the
@@ -127,8 +163,8 @@ def evaluate_candidate(
 
     candidate_song_id: an int that is the candidate song's song_id in metadata.
     """
-    span_num_samples = int(span * sample_rate)
-    step_num_samples = int(step * sample_rate)
+    config = config or PostprocessConfig()
+
     if candidate_song.shape[0] < query_sequence.shape[0]:
         # pad candidate_song to query_sequence's length
         pad_size = query_sequence.shape[0] - candidate_song.shape[0]
@@ -143,23 +179,19 @@ def evaluate_candidate(
         # for each offset, calculate the sequence similarity with offset and store it in
         # similarities, then store that in some best_similarity
         similarities = [
-            sequence_similarity_with_offset(
+            sequence_similarity(
                 x=query_sequence,
                 y=candidate_sequence,
                 y_song_id=candidate_song_id,
                 index=index,
                 metadata=metadata,
-                offset_num_samples=offset_num_samples,
-                alpha=alpha,
-            )
-            for offset_num_samples in range(
-                -span_num_samples, span_num_samples + step_num_samples, step_num_samples
+                alpha=config.alpha,
             )
         ]
-        if best_similarity is None or max(similarities) > best_similarity:
+        if not best_similarity or max(similarities) > best_similarity:
             best_similarity = float(max(similarities))
         start += 1
-    assert best_similarity is not None
+    assert best_similarity
 
     return best_similarity
 
@@ -171,7 +203,7 @@ def sequence_similarity_with_offset(
     index: faiss.Index,
     metadata: pd.DataFrame,
     offset_num_samples: int,
-    alpha: float = config.post.alpha,
+    alpha: float,
 ) -> float:
     """
     return the similarity between x and y, where y is offset from x between -span and span with size of step
@@ -179,14 +211,14 @@ def sequence_similarity_with_offset(
     offset is the number of samples to offset y from x
     """
     if offset_num_samples > 0:
-        x = x[offset_num_samples:]
-        y = y[: len(x)]
+        x = x[:, offset_num_samples:]
+        y = y[:, : len(x)]
     elif offset_num_samples < 0:
         offset_num_samples = -offset_num_samples
-        y = y[offset_num_samples:]
-        x = x[: len(y)]
+        y = y[:, offset_num_samples:]
+        x = x[:, : len(y)]
 
-    return sequence_similarity(
+    similarity = sequence_similarity(
         x=x,
         y=y,
         y_song_id=y_song_id,
@@ -195,6 +227,8 @@ def sequence_similarity_with_offset(
         alpha=alpha,
     )
 
+    return similarity
+
 
 def sequence_similarity(
     x: torch.Tensor,
@@ -202,7 +236,7 @@ def sequence_similarity(
     y_song_id: int,
     index: faiss.Index,
     metadata: pd.DataFrame,
-    alpha: float = 9.0,
+    alpha: float,
 ) -> float:
     """
     Pairwise sequence similarity metric developed in https://openaccess.thecvf.com/content_cvpr_2013/papers/Qin_Query_Adaptive_Similarity_2013_CVPR_paper.pdf
@@ -262,7 +296,7 @@ def normalized_distance(
     sample_indices = non_matching_indices[
         torch.randperm(len(non_matching_indices))[:sample_size]
     ]
-    sample = torch.tensor(index.reconstruct_batch(sample_indices), device=x.device)
+    sample = torch.tensor(index.reconstruct_batch(sample_indices), device=x.device)  # type: ignore
 
     pairwise_dists = torch.cdist(x, sample, p=2)  # (N, sample_size)
 
@@ -294,7 +328,7 @@ def parse_args() -> argparse.Namespace:
         "--repo-id",
         type=str,
         help="The HF repo id that has data to make predictions on",
-        default=config.hf.repo_id,
+        default=default_config.hf.repo_id,
     )
 
     parser.add_argument("--token", type=str, help="Your HF token", default=HF_TOKEN)
@@ -309,13 +343,13 @@ if __name__ == "__main__":
     index = faiss.read_index(str(args.index))
     metadata = pd.read_csv(args.metadata)
 
-    with SpectrogramPreprocessor() as preprocessor:
+    with Preprocessor() as preprocessor:
 
         def map_fn(ex):
             audio, sr = load_tensor_from_bytes(ex["b.mp3"])
 
-            span_num_samples = int(config.post.span * sr)
-            step_num_samples = int(config.post.step * sr)
+            span_num_samples = int(default_config.post.span * sr)
+            step_num_samples = int(default_config.post.step * sr)
 
             offsets = []
             for offset_num_samples in range(
