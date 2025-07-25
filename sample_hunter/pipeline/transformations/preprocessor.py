@@ -142,7 +142,7 @@ class Preprocessor:
             )
 
             signal = remove_low_volume_windows(
-                signal, vol_threshold=config.spec_num_samples
+                signal, vol_threshold=config.volume_threshold
             )
 
             anchor = config.mel_spectrogram(signal)
