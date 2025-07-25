@@ -195,10 +195,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--token", type=str, help="Your huggingface token", default=HF_TOKEN
-    )
-
-    parser.add_argument(
         "--num-workers",
         type=int,
         help="The number of processes to use for dataloading",
