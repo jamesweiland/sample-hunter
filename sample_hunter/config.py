@@ -10,6 +10,8 @@ from abc import ABC
 
 DEFAULT_N_FFT: int = 1024
 DEFAULT_HOP_LENGTH: int = 512
+DEFAULT_N_MELS: int = 64
+DEFAULT_SPEC_NUM_SEC: float = 1.0
 DEFAULT_SAMPLE_RATE: int = 44_100
 DEFAULT_EMBEDDING_DIM: int = 128
 DEFAULT_TRIPLET_LOSS_MARGIN: float = 0.2
@@ -84,8 +86,8 @@ class EncoderNetConfig(PretrainedConfig, YAMLConfig):
     divide_and_encode_hidden_dim: int = 256
     embedding_dim: int = DEFAULT_EMBEDDING_DIM
     sample_rate: int = 44100
-    spectrogram_num_sec: float = 1.0
-    n_mels: int = 64
+    spec_num_sec: float = DEFAULT_SPEC_NUM_SEC
+    n_mels: int = DEFAULT_N_MELS
     hop_length: int = DEFAULT_HOP_LENGTH
 
     extra_kwargs: InitVar[dict | None] = None  # extra kwargs for PretrainedConfig
@@ -140,9 +142,9 @@ class PreprocessConfig(YAMLConfig):
     sample_rate: int = DEFAULT_SAMPLE_RATE
     n_fft: int = DEFAULT_N_FFT
     hop_length: int = DEFAULT_HOP_LENGTH
-    n_mels: int = 64
+    n_mels: int = DEFAULT_N_MELS
     step_num_sec: float = 0.5
-    spec_num_sec: float = 1.0
+    spec_num_sec: float = DEFAULT_SPEC_NUM_SEC
     volume_threshold: int = -50  # dB
     offset_span: float = 0.5  # offset audio from -span to span for each window
     offset_step: float = 0.01  # amount to step each offset through
