@@ -125,6 +125,7 @@ class Preprocessor:
         **kwargs can be used to change the parameters at call-time
         """
         config = self.config.merge_kwargs(**kwargs)
+        config.mel_spectrogram = config.mel_spectrogram.to(DEVICE)
 
         # mix to mono
         signal = mix_channels(signal)
