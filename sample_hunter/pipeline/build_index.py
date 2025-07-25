@@ -53,7 +53,9 @@ def build_index(
                 keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
 
                 specs = torch.cat([song["specs"] for song in batch], dim=0)
-                collated_list = collate_spectrograms((specs, keys), shuffle=False)
+                collated_list = collate_spectrograms(
+                    (specs, keys), sub_batch_size=2_000, shuffle=False
+                )
 
                 # we have to do titles separately as there's no way to convert
                 # strings to tensors

@@ -43,6 +43,13 @@ class FunkyFinderPipeline(Pipeline):
         audio: Union[bytes, Path, str, HFAudio]
         song_id: int
 
+    class PipelineResult(TypedDict):
+        """The output of the pipeline"""
+
+        song_id: int
+        score: float
+        was_candidate: bool
+
     def __init__(
         self,
         model: EncoderNet | Path | str,
@@ -163,7 +170,7 @@ class FunkyFinderPipeline(Pipeline):
             {"tensors": model_outputs, "song_id": input_tensors["song_id"]},
         )
 
-    def postprocess(self, model_outputs, **postprocess_parameters):
+    def postprocess(self, model_outputs, **postprocess_parameters) -> PipelineResult:
         index = cast(faiss.Index, postprocess_parameters.get("index") or self.index)
         metadata = cast(
             pd.DataFrame, postprocess_parameters.get("metadata") or self.metadata
@@ -174,7 +181,7 @@ class FunkyFinderPipeline(Pipeline):
 
         was_candidate = False
         for embedding in embeddings:
-            D, I = index.search(embedding, config.top_k)
+            D, I = index.search(embedding, config.top_k)  # type: ignore
             for neighbors in I:
                 for neighbor in neighbors:
                     predicted_song_id = metadata[metadata["snippet_id"] == neighbor][
@@ -209,7 +216,7 @@ if __name__ == "__main__":
         print(title)
         song_id = metadata[metadata["song_title"] == title]["song_id"].iloc[0]
 
-        result = pipe({"audio": ex["b.mp3"], "song_id": song_id})
+        result = cast(dict, pipe({"audio": ex["b.mp3"], "song_id": song_id}))
 
         print(result)
         if result["song_id"] == song_id:

@@ -8,13 +8,11 @@ from sample_hunter.config import EncoderNetConfig
 class EncoderNet(PreTrainedModel):
     config_class = EncoderNetConfig
 
-    def __init__(
-        self,
-        config: EncoderNetConfig | None = None,
-    ):
-
-        self.config = config or EncoderNetConfig()
-        super().__init__(self.config)
+    def __init__(self, config: EncoderNetConfig | None = None, **kwargs):
+        config = config or EncoderNetConfig()
+        config = config.merge_kwargs(**kwargs)
+        super().__init__(config)
+        self.config = config
 
         spec_num_samples = int(
             self.config.spectrogram_num_sec * self.config.sample_rate

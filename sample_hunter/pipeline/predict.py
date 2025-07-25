@@ -1,18 +1,19 @@
 """Use a built FAISS index to make predictions about song snippets."""
 
 import argparse
-from typing import Tuple, List
+from typing import Tuple, List, cast
 import faiss
 import torch
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
+import webdataset as wds
 
 from .data_loading import load_tensor_from_bytes, load_webdataset
 from .transformations.preprocessor import Preprocessor
 from .encoder_net import EncoderNet
 from sample_hunter._util import HF_TOKEN, load_model
-from sample_hunter.config import PostprocessConfig, DEFAULT_TOP_K
+from sample_hunter.config import PostprocessConfig, DEFAULT_TOP_K, DEFAULT_REPO_ID
 
 
 def validate_vector_search(
@@ -328,7 +329,7 @@ def parse_args() -> argparse.Namespace:
         "--repo-id",
         type=str,
         help="The HF repo id that has data to make predictions on",
-        default=default_config.hf.repo_id,
+        default=DEFAULT_REPO_ID,
     )
 
     parser.add_argument("--token", type=str, help="Your HF token", default=HF_TOKEN)
@@ -337,94 +338,95 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    args = parse_args()
+    pass
+    # args = parse_args()
 
-    model = load_model(args.model)
-    index = faiss.read_index(str(args.index))
-    metadata = pd.read_csv(args.metadata)
+    # model = load_model(args.model)
+    # index = faiss.read_index(str(args.index))
+    # metadata = pd.read_csv(args.metadata)
 
-    with Preprocessor() as preprocessor:
+    # with Preprocessor() as preprocessor:
 
-        def map_fn(ex):
-            audio, sr = load_tensor_from_bytes(ex["b.mp3"])
+    #     def map_fn(ex):
+    #         audio, sr = load_tensor_from_bytes(ex["b.mp3"])
 
-            span_num_samples = int(default_config.post.span * sr)
-            step_num_samples = int(default_config.post.step * sr)
+    #         span_num_samples = int(default_config.post.span * sr)
+    #         step_num_samples = int(default_config.post.step * sr)
 
-            offsets = []
-            for offset_num_samples in range(
-                -span_num_samples, span_num_samples + step_num_samples, step_num_samples
-            ):
-                if offset_num_samples < 0:
-                    offset = audio[:, abs(offset_num_samples) :]
-                elif offset_num_samples > 0:
-                    offset = torch.nn.functional.pad(audio, (offset_num_samples, 0))
-                else:
-                    offset = audio
-                offsets.append(offset)
+    #         offsets = []
+    #         for offset_num_samples in range(
+    #             -span_num_samples, span_num_samples + step_num_samples, step_num_samples
+    #         ):
+    #             if offset_num_samples < 0:
+    #                 offset = audio[:, abs(offset_num_samples) :]
+    #             elif offset_num_samples > 0:
+    #                 offset = torch.nn.functional.pad(audio, (offset_num_samples, 0))
+    #             else:
+    #                 offset = audio
+    #             offsets.append(offset)
 
-            specs = [
-                preprocessor(
-                    offset,
-                    sample_rate=sr,
-                    train=False,
-                )
-                for offset in offsets
-            ]
-            return {**ex, "specs": specs}
+    #         specs = [
+    #             preprocessor(
+    #                 offset,
+    #                 sample_rate=sr,
+    #                 train=False,
+    #             )
+    #             for offset in offsets
+    #         ]
+    #         return {**ex, "specs": specs}
 
-        dataset = load_webdataset(args.repo_id, "validation", token=args.token)
-        dataset = dataset.map(map_fn)
+    #     dataset = load_webdataset(args.repo_id, "validation", token=args.token)
+    #     dataset = cast(wds.WebDataset, dataset.map(map_fn))
 
-        num_right = 0
-        num_total = 0
-        for ex in dataset:
-            print(f"iter {num_total}")
-            anchor_id = ex["json"]["ground_id"]
-            print(
-                f"gt: {metadata[metadata["song_id"] == anchor_id]["song_title"].tolist()[0]}"
-            )
-            print(f"gt id: {anchor_id}")
+    #     num_right = 0
+    #     num_total = 0
+    #     for ex in dataset:
+    #         print(f"iter {num_total}")
+    #         anchor_id = ex["json"]["ground_id"]
+    #         print(
+    #             f"gt: {metadata[metadata["song_id"] == anchor_id]["song_title"].tolist()[0]}"
+    #         )
+    #         print(f"gt id: {anchor_id}")
 
-            anchor, anchor_sr = load_tensor_from_bytes(ex["a.mp3"])
-            positive, positive_sr = load_tensor_from_bytes(ex["b.mp3"])
-            # play_tensor_audio(anchor, "Playing anchor...", sample_rate=anchor_sr)
-            # play_tensor_audio(positive, "Playing positive...", sample_rate=positive_sr)
+    #         anchor, anchor_sr = load_tensor_from_bytes(ex["a.mp3"])
+    #         positive, positive_sr = load_tensor_from_bytes(ex["b.mp3"])
+    #         # play_tensor_audio(anchor, "Playing anchor...", sample_rate=anchor_sr)
+    #         # play_tensor_audio(positive, "Playing positive...", sample_rate=positive_sr)
 
-            BOLD = "\033[1m"
-            RESET = "\033[0m"
-            RED = "\033[91m"
-            GREEN = "\033[92m"
+    #         BOLD = "\033[1m"
+    #         RESET = "\033[0m"
+    #         RED = "\033[91m"
+    #         GREEN = "\033[92m"
 
-            success = False
-            for spec in ex["specs"]:
-                if validate_vector_search(spec, index, model, metadata, anchor_id):
-                    num_right += 1
-                    success = True
-                    print(f"{BOLD}{GREEN}SUCCESS: {ex["json"]["title"]}{RESET}")
-                    break
+    #         success = False
+    #         for spec in ex["specs"]:
+    #             if validate_vector_search(spec, index, model, metadata, anchor_id):
+    #                 num_right += 1
+    #                 success = True
+    #                 print(f"{BOLD}{GREEN}SUCCESS: {ex["json"]["title"]}{RESET}")
+    #                 break
 
-            if not success:
-                print(f"{BOLD}{RED}FAIL: {ex["json"]["title"]} failed{RESET}")
+    #         if not success:
+    #             print(f"{BOLD}{RED}FAIL: {ex["json"]["title"]} failed{RESET}")
 
-            # play_tensor_audio(anchor, "Playing anchor...", sample_rate=anchor_sr)
-            # play_tensor_audio(positive, "Playing positive...", sample_rate=positive_sr)
-            num_total += 1
+    #         # play_tensor_audio(anchor, "Playing anchor...", sample_rate=anchor_sr)
+    #         # play_tensor_audio(positive, "Playing positive...", sample_rate=positive_sr)
+    #         num_total += 1
 
-            # prediction, score = predict(
-            #     ex["specs"], index, model, metadata, gt=anchor_id
-            # )
-            # print(f"predict id: {prediction}")
-            # print(
-            #     f"prediction: {metadata[metadata["song_id"] == prediction]["song_title"].tolist()[0]}"
-            # )
-            # print(f"score: {score}")
+    #         # prediction, score = predict(
+    #         #     ex["specs"], index, model, metadata, gt=anchor_id
+    #         # )
+    #         # print(f"predict id: {prediction}")
+    #         # print(
+    #         #     f"prediction: {metadata[metadata["song_id"] == prediction]["song_title"].tolist()[0]}"
+    #         # )
+    #         # print(f"score: {score}")
 
-            # print("-----------------------------------------------------------")
+    #         # print("-----------------------------------------------------------")
 
-            # if prediction == ex["json"]["ground_id"]:
-            #     num_right += 1
+    #         # if prediction == ex["json"]["ground_id"]:
+    #         #     num_right += 1
 
-            # num_total += 1
+    #         # num_total += 1
 
-        print(f"Total accuracy: {(num_right / num_total):.2%}")
+    #     print(f"Total accuracy: {(num_right / num_total):.2%}")

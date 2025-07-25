@@ -341,12 +341,12 @@ if __name__ == "__main__":
             num_epochs = range(1, train_config.num_epochs + 1)
         else:
             # make a new model
-            model = EncoderNet().to(DEVICE)
+            model = EncoderNet().to(DEVICE)  # type: ignore
             num_epochs = range(1, train_config.num_epochs + 1)
 
         save_per_epoch = args.out if args.save_per_epoch else None
 
-        model = EncoderNet().to(DEVICE)
+        model = EncoderNet().to(DEVICE)  # type: ignore
 
         adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
         triplet_loss = nn.TripletMarginLoss()
