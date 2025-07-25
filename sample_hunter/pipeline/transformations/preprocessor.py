@@ -53,6 +53,7 @@ class Preprocessor:
         """Set up the resources for the downstream classes"""
         if self.obfuscator is not None:
             self.obfuscator.__enter__()
+        self._entered_context = True
         return self
 
     def __exit__(self, *exc):
@@ -192,7 +193,10 @@ class Preprocessor:
             the obfuscation time-distorted the tensor, it will be truncated
             or padded to match the exact shape of the input
         """
+        # we can lazily intialize obfuscator if it wasn't passed during construction
         if self.obfuscator is None:
             self.obfuscator = Obfuscator()
+            if self._entered_context:
+                self.obfuscator.__enter__()
         ob_sig = self.obfuscator(signal)
         return ob_sig
