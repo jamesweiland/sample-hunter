@@ -21,6 +21,7 @@ from sample_hunter.config import (
     PreprocessConfig,
     TrainConfig,
     ObfuscatorConfig,
+    EncoderNetConfig,
     DEFAULT_REPO_ID,
 )
 from sample_hunter._util import (
@@ -254,10 +255,12 @@ if __name__ == "__main__":
         preprocess_config = PreprocessConfig.from_yaml(args.config)
         train_config = TrainConfig.from_yaml(args.config)
         obfuscator_config = ObfuscatorConfig.from_yaml(args.config)
+        encoder_net_config = EncoderNetConfig.from_yaml(args.config)
     else:
         preprocess_config = PreprocessConfig()
         train_config = TrainConfig()
         obfuscator_config = ObfuscatorConfig()
+        encoder_net_config = EncoderNetConfig()
 
     with Preprocessor(
         preprocess_config, obfuscator=Obfuscator(obfuscator_config)
@@ -291,10 +294,19 @@ if __name__ == "__main__":
             return [(anchor, positive, k) for anchor, positive, k in sub_batches]
 
         train_dataset = cast(
-            wds.WebDataset, load_webdataset(args.repo_id, "train", token=args.token, cache_dir=train_config.cache_dir)
+            wds.WebDataset,
+            load_webdataset(
+                args.repo_id,
+                "train",
+                token=args.token,
+                cache_dir=train_config.cache_dir,
+            ),
         ).map(map_fn)
         test_dataset = cast(
-            wds.WebDataset, load_webdataset(args.repo_id, "test", token=args.token, cache_dir=train_config.cache_dir)
+            wds.WebDataset,
+            load_webdataset(
+                args.repo_id, "test", token=args.token, cache_dir=train_config.cache_dir
+            ),
         ).map(map_fn)
 
         train_dataloader = DataLoader(
@@ -331,22 +343,20 @@ if __name__ == "__main__":
                     f"Config num_epochs: {train_config.num_epochs}"
                 )
 
-            model = load_model(args.from_)
+            model = load_model(args.from_, encoder_net_config)
             num_epochs = range(epochs_already_trained + 1, train_config.num_epochs + 1)
         elif args.from_:
             if not args.from_.exists():
                 raise ValueError(f"--from not found: {args.from_}")
 
-            model = load_model(args.from_)
+            model = load_model(args.from_, encoder_net_config)
             num_epochs = range(1, train_config.num_epochs + 1)
         else:
             # make a new model
-            model = EncoderNet().to(DEVICE)  # type: ignore
+            model = EncoderNet(encoder_net_config).to(DEVICE)  # type: ignore
             num_epochs = range(1, train_config.num_epochs + 1)
 
         save_per_epoch = args.out if args.save_per_epoch else None
-
-        model = EncoderNet().to(DEVICE)  # type: ignore
 
         adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
         triplet_loss = nn.TripletMarginLoss()
