@@ -84,12 +84,10 @@ class Obfuscator:
         """
         with torch.no_grad():
             batch = batch.contiguous() if not batch.is_contiguous() else batch
-            print(batch.shape)
             batch = self.offset(batch)
             batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)
             batch = self.apply_filter(batch)
-            print(batch.shape)
             batch = self.overlay_musan(batch)
             return batch
 
