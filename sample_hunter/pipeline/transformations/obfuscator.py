@@ -84,10 +84,12 @@ class Obfuscator:
         """
         with torch.no_grad():
             batch = batch.contiguous() if not batch.is_contiguous() else batch
+            print(batch.shape)
             batch = self.offset(batch)
             batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)
             batch = self.apply_filter(batch)
+            print(batch.shape)
             batch = self.overlay_musan(batch)
             return batch
 
@@ -106,8 +108,11 @@ class Obfuscator:
 
         # now, pad input_indices by marking those that are out of bounds, and zero-clamp
         valid_mask = (input_indices >= 0) & (input_indices < signal.shape[-1])
-        input_indices_clamped = input_indices.clamp(0, signal.shape[-1] - 1)
-        shifted = torch.gather(signal, 1, input_indices_clamped)
+        valid_mask = valid_mask.unsqueeze(1)
+        input_indices_clamped = input_indices.clamp(0, signal.shape[-1] - 1).unsqueeze(
+            1
+        )
+        shifted = torch.gather(signal, dim=2, index=input_indices_clamped)
         shifted[~valid_mask] = 0.0
         return shifted
 
@@ -221,8 +226,7 @@ class Obfuscator:
 
         # build up a sample of songs from musan
         n = signal.shape[0]
-        window_num_samples = int(self.config.sample_rate * signal.shape[2])
-        sample = torch.empty((0, 1, window_num_samples), device=signal.device)
+        sample = torch.empty_like(signal)
         while sample.shape[0] < n:
             try:
                 idx = random.randint(0, len(self.musan) - 1)
@@ -242,49 +246,33 @@ class Obfuscator:
 
 
 if __name__ == "__main__":
+    # listen to obfuscated vs original audio
     pass
-    # # listen to obfuscated vs original audio
-    # from .spectrogram_preprocessor import SpectrogramPreprocessor
+    # from .preprocessor import Preprocessor
     # from sample_hunter.pipeline.data_loading import load_webdataset
     # from sample_hunter._util import HF_TOKEN, play_tensor_audio, plot_spectrogram
     # from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
 
-    # with SpectrogramPreprocessor() as preprocessor:
+    # with Preprocessor() as preprocessor:
     #     dataset = load_webdataset("samplr/songs", "train", HF_TOKEN)
 
     #     def map_fn(ex):
-    #         # load the audio as tensor form so it can be passed to obfuscator
-    #         signal, sr = load_tensor_from_bytes(ex["mp3"])
-    #         # mix to mono
-    #         signal = mix_channels(signal)
-
-    #         # resample to target sampling rate
-    #         signal = resample(signal, sr, default_config.preprocess.sample_rate)
-
-    #         signal = create_windows(signal)
-
-    #         anchor = remove_low_volume_windows(
-    #             signal, default_config.preprocess.volume_threshold
-    #         )
-
-    #         positive = preprocessor.obfuscate_window(anchor)
+    #         positive, anchor = preprocessor(ex["mp3"], train=True)
 
     #         return {
     #             **ex,
     #             "anchor": anchor,
     #             "positive": positive,
-    #             "anchor_spec": preprocessor.mel_spectrogram(anchor),
-    #             "positive_spec": preprocessor.mel_spectrogram(positive),
     #         }
 
     #     dataset = dataset.map(map_fn)
     #     for ex in dataset:
     #         print(f"Song: {ex["json"]["title"]}\n")
 
-    #         for i in range(min(ex["anchor"].shape[0], 10)):
-    #             play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
-    #             play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
-    #             plot_spectrogram(ex["anchor_spec"][i], f"anchor {i}")
-    #             plot_spectrogram(ex["positive_spec"][i], f"positive {i}")
+    #         # for i in range(min(ex["anchor"].shape[0], 10)):
+    #         #     play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
+    #         #     play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
+    #         #     plot_spectrogram(ex["anchor_spec"][i], f"anchor {i}")
+    #         #     plot_spectrogram(ex["positive_spec"][i], f"positive {i}")
 
     #         print("--------------------------------------------------")
