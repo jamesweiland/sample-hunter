@@ -4,7 +4,8 @@ import torch.multiprocessing as mp
 import torchaudio
 
 from .functional import resize
-from sample_hunter._util import config, DEVICE, PROCS
+from sample_hunter._util import DEVICE, PROCS
+from sample_hunter.config import DEFAULT_N_FFT, DEFAULT_HOP_LENGTH
 
 __all__ = ["BatchedTimeStretchPerturbation"]
 
@@ -49,8 +50,8 @@ class BatchedTimeStretchPerturbation:
     def __init__(
         self,
         factors: Sequence[float],
-        n_fft: int = config.preprocess.n_fft,
-        hop_length: int = config.preprocess.hop_length,
+        n_fft: int = DEFAULT_N_FFT,
+        hop_length: int = DEFAULT_HOP_LENGTH,
         num_workers: int = PROCS,
         device: str = DEVICE,
     ):

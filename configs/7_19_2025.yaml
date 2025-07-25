@@ -6,7 +6,6 @@ preprocess:
   step_length: 0.5 # seconds of overlay
   spectrogram_width: 1.0 # seconds per spectrogram
   volume_threshold: -50 # dB, remove any examples below this threshold
-  take_rate: 1.0 # the percentage of windows to take from a song during training
   obfuscator:
     time_stretch_factors: [0.75, 1, 1.25, 1.5]
     pitch_factors: [0.6, 0.8, 1, 1.2, 1.5]
@@ -41,13 +40,12 @@ network:
   learning_rate: 0.00005
   num_epochs: 100
   alpha: 0.2
-  test_split: 0.25
 
 post:
   span: 0.5 # absolute value of seconds to offset positive from ground
   step: 0.01 # seconds to step each offset from -span to span
   alpha: 9.0 # constant to use in sequence similarity formula
-  k: 10
+  top_k: 10
 
 paths:
   log_dir: "/home/james/code/sample-hunter/_data/logs"

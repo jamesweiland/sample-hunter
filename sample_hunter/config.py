@@ -1,176 +1,197 @@
-from dataclasses import dataclass
+import torchaudio
+from functools import cached_property
+from dataclasses import InitVar, dataclass, fields, field, replace, asdict
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple, TypeVar, Type, Union, cast
 import yaml
+from transformers.configuration_utils import PretrainedConfig
+from abc import ABC
 
 
-_CONFIG_OBJ = None
-_CONFIG_PATH = None
+DEFAULT_N_FFT: int = 1024
+DEFAULT_HOP_LENGTH: int = 512
+DEFAULT_SAMPLE_RATE: int = 44_100
+DEFAULT_EMBEDDING_DIM: int = 128
+DEFAULT_TRIPLET_LOSS_MARGIN: float = 0.2
+DEFAULT_TOP_K: int = 10
 
+DEFAULT_REPO_ID: str = "samplr/songs"
+DEFAULT_CACHE_DIR: Path = Path("/home/james/code/sample-hunter/_data/cache")
 
-@dataclass
-class ObfuscatorConfig:
-    time_stretch_factors: Sequence[float]
-    pitch_factors: Sequence[float]
-    lowpass_range: Tuple[int, int]
-    highpass_range: Tuple[int, int]
-    whitenoise_range: Tuple[float, float]
-    musan_noise_range: Tuple[float, float]
-    lowpass_frac: float
-    num_tones_to_add: int
-    tone_gen_frequency_range: Tuple[int, int]
-    tone_gen_amplitude_range: Tuple[float, float]
-    tone_gen_duration_range: Tuple[float, float]
+T = TypeVar("T", bound="YAMLConfig")
 
 
 @dataclass
-class PreprocessConfig:
-    sample_rate: int
-    n_fft: int
-    hop_length: int
-    n_mels: int
-    step_length: int
-    spectrogram_width: int
-    obfuscator: ObfuscatorConfig
-    volume_threshold: int
-    take_rate: float
+class YAMLConfig(ABC):
+    @classmethod
+    def from_yaml(cls: Type[T], yaml_: Union[Path, str]) -> T:
+        """
+        Load config from a YAML file and instantiate the config dataclass.
+        """
+
+        with open(yaml_, "r") as f:
+            cfg = yaml.safe_load(f)
+
+        init_kwargs = {}
+        for field in fields(cls):
+            field_name = field.name
+            if field_name in cfg:
+                init_kwargs[field_name] = cfg[field_name]
+            else:
+                init_kwargs[field_name] = field.default
+
+        return cls(**init_kwargs)
+
+    def merge_kwargs(self, **kwargs):
+        """
+        Given kwargs, return a new instance of `cls` with updated attributes in kwargs.
+        If a field is not in kwargs but is in this instance, the original instance's attribute will be used.
+        """
+        if kwargs:
+            # kwargs might have keys that aren't attributes of the instance, so need to filter kwargs
+            valid_fields = {f.name for f in fields(self)}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_fields}
+            return replace(self, **filtered_kwargs)
+        return self
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Returns the attributes as a python dictionary
+        """
+        return asdict(self)
 
 
 @dataclass
-class NetworkConfig:
-    stride: int
-    padding: int
-    pool_kernel_size: int
-    conv_layer_dims: List[Tuple[int, int]]
-    min_dims: Tuple[int, int]
-    num_branches: int
-    divide_and_encode_hidden_dim: int
-    embedding_dim: int
-    source_batch_size: int
-    sub_batch_size: int
-    learning_rate: int
-    num_epochs: int
-    alpha: float
-    test_split: float
+class EncoderNetConfig(PretrainedConfig, YAMLConfig):
+    """Stores the necessary hyperparameters for instantiating the model architecture."""
+
+    kernel_stride: int = 1
+    kernel_padding: int = 1
+    pool_kernel_size: int = 2
+    conv_layer_dims: List[Tuple[int, int]] = field(
+        default_factory=lambda: [
+            (1, 16),
+            (16, 32),
+            (32, 64),
+            (64, 128),
+            (128, 256),
+            (256, 384),
+            (384, 512),
+        ]
+    )
+    min_dims: Tuple[int, int] = (1, 1)
+    num_branches: int = 4
+    divide_and_encode_hidden_dim: int = 256
+    embedding_dim: int = DEFAULT_EMBEDDING_DIM
+    sample_rate: int = 44100
+    spectrogram_num_sec: float = 1.0
+    n_mels: int = 64
+    hop_length: int = DEFAULT_HOP_LENGTH
+
+    extra_kwargs: InitVar[dict | None] = None  # extra kwargs for PretrainedConfig
+
+    def __post__init__(self, extra_kwargs):
+        """Initialize with args for PretrainedConfig"""
+        if extra_kwargs is not None:
+            super().__init__(**extra_kwargs)
+        else:
+            super().__init__()
 
 
 @dataclass
-class PostConfig:
-    span: float
-    step: float
-    alpha: float
-    k: int
+class ObfuscatorConfig(YAMLConfig):
+    time_stretch_factors: Sequence[float] = field(
+        default_factory=lambda: (0.75, 1.0, 1.25, 1.5)
+    )
+    pitch_factors: Sequence[float] = field(
+        default_factory=lambda: (0.6, 0.8, 1.0, 1.2, 1.5)
+    )
+    lowpass_range: Tuple[int, int] = (6_000, 12_000)
+    highpass_range: Tuple[int, int] = (20, 1000)
+    musan_noise_range: Tuple[float, float] = (-5, 5)
+    offset_span: float = (
+        0.25  # offset each sample randomly from -offset_span seconds to offset_span seconds
+    )
+    lowpass_frac: float = 0.5
+    musan: Path = Path("/home/james/code/sample-hunter/_data/musan")
+    sample_rate: int = DEFAULT_SAMPLE_RATE
+    n_fft: int = DEFAULT_N_FFT
+    hop_length: int = DEFAULT_HOP_LENGTH
+
+    @property
+    def offset_span_num_samples(self) -> int:
+        return int(self.sample_rate * self.offset_span)
 
 
 @dataclass
-class PathsConfig:
-    log_dir: Path
-    cache_dir: Path
-    musan: Path
+class TrainConfig(YAMLConfig):
+    source_batch_size: int = 200
+    sub_batch_size: int = 2_000
+    learning_rate: float = 0.00005
+    num_epochs: int = 10
+    alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN
+    tensorboard_log_dir: Path = Path("/home/james/code/sample-hunter/_data/logs")
+    tensorboard: str = "epoch"  # can be "none", "batch", or "epoch"
 
 
 @dataclass
-class HuggingfaceConfig:
-    repo_id: str
-    url: str
+class PreprocessConfig(YAMLConfig):
+    sample_rate: int = DEFAULT_SAMPLE_RATE
+    n_fft: int = DEFAULT_N_FFT
+    hop_length: int = DEFAULT_HOP_LENGTH
+    n_mels: int = 64
+    step_num_sec: float = 0.5
+    spec_num_sec: float = 1.0
+    volume_threshold: int = -50  # dB
+    offset_span: float = 0.5  # offset audio from -span to span for each window
+    offset_step: float = 0.01  # amount to step each offset through
 
+    @property
+    def offset_span_num_samples(self) -> int:
+        return int(self.offset_span * self.sample_rate)
 
-@dataclass
-class Config:
-    preprocess: PreprocessConfig
-    network: NetworkConfig
-    paths: PathsConfig
-    hf: HuggingfaceConfig
-    post: PostConfig
+    @property
+    def offset_step_num_samples(self) -> int:
+        return int(self.offset_step * self.sample_rate)
 
+    @property
+    def step_num_samples(self) -> int:
+        return int(self.sample_rate * self.step_num_sec)
 
-def set_config_path(path: Path):
-    global _CONFIG_PATH
-    _CONFIG_PATH = path
+    @property
+    def spec_num_samples(self) -> int:
+        return int(self.sample_rate * self.spec_num_sec)
 
-
-def get_config() -> Config:
-    global _CONFIG_OBJ, _CONFIG_PATH
-    if _CONFIG_PATH is None:
-        raise RuntimeError(
-            "Attempting to get config without calling set_config_path first"
+    @cached_property
+    def mel_spectrogram(self) -> torchaudio.transforms.MelSpectrogram:
+        return torchaudio.transforms.MelSpectrogram(
+            n_mels=self.n_mels,
+            sample_rate=self.sample_rate,
+            hop_length=self.hop_length,
+            n_fft=self.n_fft,
         )
-    if _CONFIG_OBJ is None:
-        _CONFIG_OBJ = load_config(_CONFIG_PATH)
-    return _CONFIG_OBJ
 
 
-def load_config(config_path: Path) -> Config:
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
+@dataclass
+class PostprocessConfig(YAMLConfig):
+    alpha: float = 9.0
+    top_k: int = DEFAULT_TOP_K
+    sample_rate: int = DEFAULT_SAMPLE_RATE
 
-    obfuscator = ObfuscatorConfig(
-        time_stretch_factors=tuple(
-            cfg["preprocess"]["obfuscator"]["time_stretch_factors"]
-        ),
-        pitch_factors=tuple(cfg["preprocess"]["obfuscator"]["pitch_factors"]),
-        lowpass_range=tuple(cfg["preprocess"]["obfuscator"]["lowpass_range"]),
-        highpass_range=tuple(cfg["preprocess"]["obfuscator"]["highpass_range"]),
-        whitenoise_range=tuple(cfg["preprocess"]["obfuscator"]["whitenoise_range"]),
-        musan_noise_range=tuple(cfg["preprocess"]["obfuscator"]["musan_noise_range"]),
-        lowpass_frac=cfg["preprocess"]["obfuscator"]["lowpass_frac"],
-        num_tones_to_add=cfg["preprocess"]["obfuscator"]["num_tones_to_add"],
-        tone_gen_frequency_range=cfg["preprocess"]["obfuscator"][
-            "tone_gen_frequency_range"
-        ],
-        tone_gen_amplitude_range=cfg["preprocess"]["obfuscator"][
-            "tone_gen_amplitude_range"
-        ],
-        tone_gen_duration_range=cfg["preprocess"]["obfuscator"][
-            "tone_gen_duration_range"
-        ],
-    )
-    preprocess = PreprocessConfig(
-        sample_rate=cfg["preprocess"]["sample_rate"],
-        n_fft=cfg["preprocess"]["n_fft"],
-        hop_length=cfg["preprocess"]["hop_length"],
-        n_mels=cfg["preprocess"]["n_mels"],
-        step_length=cfg["preprocess"]["step_length"],
-        spectrogram_width=cfg["preprocess"]["spectrogram_width"],
-        obfuscator=obfuscator,
-        volume_threshold=cfg["preprocess"]["volume_threshold"],
-        take_rate=cfg["preprocess"]["take_rate"],
-    )
-    network = NetworkConfig(
-        stride=cfg["network"]["stride"],
-        padding=cfg["network"]["padding"],
-        pool_kernel_size=cfg["network"]["pool_kernel_size"],
-        conv_layer_dims=[tuple(pair) for pair in cfg["network"]["conv_layer_dims"]],
-        min_dims=cfg["network"]["min_dims"],
-        num_branches=cfg["network"]["num_branches"],
-        divide_and_encode_hidden_dim=cfg["network"]["divide_and_encode_hidden_dim"],
-        embedding_dim=cfg["network"]["embedding_dim"],
-        source_batch_size=cfg["network"]["source_batch_size"],
-        sub_batch_size=cfg["network"]["sub_batch_size"],
-        learning_rate=cfg["network"]["learning_rate"],
-        num_epochs=cfg["network"]["num_epochs"],
-        alpha=cfg["network"]["alpha"],
-        test_split=cfg["network"]["test_split"],
-    )
-    post = PostConfig(
-        span=cfg["post"]["span"],
-        step=cfg["post"]["step"],
-        alpha=cfg["post"]["alpha"],
-        k=cfg["post"]["k"],
-    )
-    paths = PathsConfig(
-        log_dir=Path(cfg["paths"]["log_dir"]),
-        cache_dir=Path(cfg["paths"]["cache_dir"]),
-        musan=Path(cfg["paths"]["musan"]),
-    )
-    hf = HuggingfaceConfig(
-        repo_id=cfg["hf"]["repo_id"],
-        url=cfg["hf"]["url"],
-    )
-    return Config(
-        preprocess=preprocess,
-        network=network,
-        post=post,
-        paths=paths,
-        hf=hf,
-    )
+
+@dataclass
+class FunkyFinderPipelineConfig(YAMLConfig):
+    preprocess: PreprocessConfig = field(default_factory=lambda: PreprocessConfig())
+    postprocess: PostprocessConfig = field(default_factory=lambda: PostprocessConfig())
+
+    extra_kwargs: InitVar[dict | None] = None
+
+    def __post_init__(self, extra_kwargs):
+        if extra_kwargs is not None:
+            self.preprocess = self.preprocess.merge_kwargs(**extra_kwargs)
+            self.postprocess = self.postprocess.merge_kwargs(**extra_kwargs)
+
+    def to_dict(self) -> Dict[str, Any]:
+        to_return = asdict(self.preprocess)
+        to_return.update(asdict(self.postprocess))
+        return to_return

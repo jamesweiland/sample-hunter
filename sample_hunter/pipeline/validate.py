@@ -5,16 +5,24 @@ import torch
 import torch.nn as nn
 import webdataset as wds
 
+from .transformations.functional import resample
 from .evaluate import evaluate_batch
-from .transformations.spectrogram_preprocessor import SpectrogramPreprocessor
+from .transformations.preprocessor import Preprocessor
 from .data_loading import load_tensor_from_bytes, load_webdataset
-from sample_hunter._util import config, DEVICE, HF_TOKEN, load_model, play_tensor_audio
+from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_SAMPLE_RATE
+from sample_hunter._util import (
+    DEVICE,
+    HF_TOKEN,
+    load_model,
+    play_tensor_audio,
+)
 
 
 def validate(
     model: nn.Module,
     dataset: wds.WebDataset,
-    alpha: float = config.network.alpha,
+    alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN,
+    sample_rate: int = DEFAULT_SAMPLE_RATE,
     device: str = DEVICE,
     debug: bool = False,
 ) -> Tuple[float, int]:
@@ -27,27 +35,27 @@ def validate(
     """
 
     with torch.no_grad():
-        with SpectrogramPreprocessor() as preprocessor:
+        with Preprocessor() as preprocessor:
 
             def map_fn(ex):
                 anchor, anchor_sr = load_tensor_from_bytes(ex["a.mp3"])
                 positive, positive_sr = load_tensor_from_bytes(ex["b.mp3"])
 
                 # we resample them out here so we can mess around with the lengths
-                anchor = preprocessor.resample(anchor, anchor_sr)
-                positive = preprocessor.resample(positive, positive_sr)
+                anchor = resample(anchor, anchor_sr, sample_rate)
+                positive = resample(positive, positive_sr, sample_rate)
 
                 max_length = max(anchor.shape[1], positive.shape[1])
 
                 anchor = preprocessor(
                     anchor,
-                    sample_rate=config.preprocess.sample_rate,
+                    sample_rate=sample_rate,
                     target_length=max_length,
                     train=False,
                 )
                 positive = preprocessor(
                     positive,
-                    sample_rate=config.preprocess.sample_rate,
+                    sample_rate=sample_rate,
                     target_length=max_length,
                     train=False,
                 )
@@ -138,7 +146,7 @@ def parse_args() -> argparse.Namespace:
         "--repo-id",
         type=str,
         help="The HF repo id to use",
-        default=config.hf.repo_id,
+        default=default_config.hf.repo_id,
     )
 
     parser.add_argument(
