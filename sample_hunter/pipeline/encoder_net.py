@@ -14,9 +14,7 @@ class EncoderNet(PreTrainedModel):
         super().__init__(config)
         self.config = config
 
-        spec_num_samples = int(
-            self.config.spectrogram_num_sec * self.config.sample_rate
-        )
+        spec_num_samples = int(self.config.spec_num_sec * self.config.sample_rate)
 
         input_shape = torch.Size(
             (1, self.config.n_mels, 1 + spec_num_samples // self.config.hop_length)
