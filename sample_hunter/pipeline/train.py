@@ -291,10 +291,10 @@ if __name__ == "__main__":
             return [(anchor, positive, k) for anchor, positive, k in sub_batches]
 
         train_dataset = cast(
-            wds.WebDataset, load_webdataset(args.repo_id, "train", args.token)
+            wds.WebDataset, load_webdataset(args.repo_id, "train", token=args.token, cache_dir=train_config.cache_dir)
         ).map(map_fn)
         test_dataset = cast(
-            wds.WebDataset, load_webdataset(args.repo_id, "test", args.token)
+            wds.WebDataset, load_webdataset(args.repo_id, "test", token=args.token, cache_dir=train_config.cache_dir)
         ).map(map_fn)
 
         train_dataloader = DataLoader(

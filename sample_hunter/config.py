@@ -132,6 +132,7 @@ class TrainConfig(YAMLConfig):
     alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN
     tensorboard_log_dir: Path = Path("/home/james/code/sample-hunter/_data/logs")
     tensorboard: str = "epoch"  # can be "none", "batch", or "epoch"
+    cache_dir: Path = Path(DEFAULT_CACHE_DIR)
 
 
 @dataclass
