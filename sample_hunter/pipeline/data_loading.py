@@ -12,6 +12,7 @@ from huggingface_hub import HfApi
 import torchaudio
 import webdataset as wds
 import re
+import traceback
 
 from sample_hunter._util import HF_TOKEN
 from sample_hunter.config import DEFAULT_CACHE_DIR
@@ -41,7 +42,7 @@ def flatten_sub_batches(
             break  # End of dataloader
         except Exception as e:
             print("An error occurred while fetching a batch from the dataloader")
-            print(str(e))
+            traceback.print_exc()
             continue
 
         for sub_batch in batch:
@@ -56,8 +57,10 @@ def collate_spectrograms(
     """
     Collate a batch of mappings of transformed tensors before passing to the dataloader.
 
-    This function expects tensors with shape (batch_size, num_windows, num_channels, n_mels, time_frames)
-    and returns a tensor with shape (new_batch_size, num_channels, n_mels, time_frames)
+    This function expects tensors with shape (source_batch_size, num_windows, num_channels, n_mels, time_frames)
+    and returns a tensor with shape (sub_batch_size, num_channels, n_mels, time_frames)
+
+    source_batch_size is the batch_size given to the dataloader
     """
     if isinstance(batch, torch.Tensor):
         if shuffle:
@@ -71,8 +74,6 @@ def collate_spectrograms(
         return tuple(sub_batches)
 
     elif isinstance(batch, tuple):
-        for i in range(len(batch)):
-            assert batch[0].shape[0] == batch[i].shape[0]
 
         if shuffle:
             perm = torch.randperm(batch[0].shape[0])

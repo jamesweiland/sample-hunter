@@ -16,6 +16,7 @@ DEFAULT_SAMPLE_RATE: int = 44_100
 DEFAULT_EMBEDDING_DIM: int = 128
 DEFAULT_TRIPLET_LOSS_MARGIN: float = 0.2
 DEFAULT_TOP_K: int = 10
+DEFAULT_VOLUME_THRESHOLD: int = -50  # dbfs, remove anything below this
 
 DEFAULT_REPO_ID: str = "samplr/songs"
 DEFAULT_CACHE_DIR: Path = Path("/home/james/code/sample-hunter/_data/cache")
@@ -119,6 +120,8 @@ class ObfuscatorConfig(YAMLConfig):
     sample_rate: int = DEFAULT_SAMPLE_RATE
     n_fft: int = DEFAULT_N_FFT
     hop_length: int = DEFAULT_HOP_LENGTH
+    spec_num_sec: float = DEFAULT_SPEC_NUM_SEC
+    volume_threshold: int = DEFAULT_VOLUME_THRESHOLD
 
     @property
     def offset_span_num_samples(self) -> int:
@@ -145,7 +148,7 @@ class PreprocessConfig(YAMLConfig):
     n_mels: int = DEFAULT_N_MELS
     step_num_sec: float = 0.5
     spec_num_sec: float = DEFAULT_SPEC_NUM_SEC
-    volume_threshold: int = -50  # dB
+    volume_threshold: int = DEFAULT_VOLUME_THRESHOLD  # dB
     offset_span: float = 0.5  # offset audio from -span to span for each window
     offset_step: float = 0.01  # amount to step each offset through
 
