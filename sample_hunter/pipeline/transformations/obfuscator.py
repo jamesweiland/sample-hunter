@@ -5,7 +5,7 @@ import torch
 
 from functools import cached_property
 
-from .functional import resize
+from .functional import remove_low_volume_windows
 from .my_musan import MusanException, MyMusan
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
@@ -49,7 +49,13 @@ class Obfuscator:
 
     @cached_property
     def musan(self) -> MyMusan:
-        return MyMusan(self.config.musan, subset="music")
+        return MyMusan(
+            self.config.musan,
+            subset="music",
+            sample_rate=self.config.sample_rate,
+            spec_num_sec=self.config.spec_num_sec,
+            volume_threshold=self.config.volume_threshold,
+        )
 
     @cached_property
     def time_stretch_perturbation(self) -> BatchedTimeStretchPerturbation:
@@ -84,11 +90,15 @@ class Obfuscator:
         """
         with torch.no_grad():
             batch = batch.contiguous() if not batch.is_contiguous() else batch
+
             batch = self.offset(batch)
+
             batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)
             batch = self.apply_filter(batch)
+
             batch = self.overlay_musan(batch)
+
             return batch
 
     def offset(self, signal: torch.Tensor) -> torch.Tensor:
@@ -111,7 +121,8 @@ class Obfuscator:
             1
         )
         shifted = torch.gather(signal, dim=2, index=input_indices_clamped)
-        shifted[~valid_mask] = 0.0
+        shifted[~valid_mask] = 0
+
         return shifted
 
     def apply_filter(self, signal: torch.Tensor) -> torch.Tensor:
@@ -225,27 +236,36 @@ class Obfuscator:
         # build up a sample of songs from musan
         n = signal.shape[0]
         sample = torch.empty_like(signal)
-        while sample.shape[0] < n:
+        num_windows_added = 0
+        while num_windows_added < n:
             try:
                 idx = random.randint(0, len(self.musan) - 1)
                 musan_signal, name = self.musan[idx]
-                sample = torch.cat([sample, musan_signal], dim=0)
+
+                remaining = n - num_windows_added
+                windows_to_add = min(musan_signal.shape[0], remaining)
+
+                # add musan signal to the correct sample slice, checking for overflow
+                sample[num_windows_added : num_windows_added + windows_to_add] = (
+                    musan_signal[:windows_to_add]
+                )
+                num_windows_added += windows_to_add
             except MusanException:
                 continue
-        # in case that now sample has more than signal
-        sample = sample[:n]
 
         noise_levels = self.config.musan_noise_range[0] + (
             self.config.musan_noise_range[1] - self.config.musan_noise_range[0]
-        ) * torch.rand(signal.shape[0], device=signal.device, dtype=torch.float16)
-        return torchaudio.functional.add_noise(
+        ) * torch.rand(signal.shape[0], device=signal.device, dtype=torch.float32)
+
+        res = torchaudio.functional.add_noise(
             waveform=signal, noise=sample, snr=noise_levels.unsqueeze(1)
         )
+        return res
 
 
 if __name__ == "__main__":
-    # listen to obfuscated vs original audio
     pass
+    # listen to obfuscated vs original audio
     # from .preprocessor import Preprocessor
     # from sample_hunter.pipeline.data_loading import load_webdataset
     # from sample_hunter._util import HF_TOKEN, play_tensor_audio, plot_spectrogram
@@ -267,10 +287,10 @@ if __name__ == "__main__":
     #     for ex in dataset:
     #         print(f"Song: {ex["json"]["title"]}\n")
 
-    #         # for i in range(min(ex["anchor"].shape[0], 10)):
-    #         #     play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
-    #         #     play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
-    #         #     plot_spectrogram(ex["anchor_spec"][i], f"anchor {i}")
-    #         #     plot_spectrogram(ex["positive_spec"][i], f"positive {i}")
+    #         for i in range(min(ex["anchor"].shape[0], 10)):
+    #             #     play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
+    #             #     play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
+    #             plot_spectrogram(ex["anchor"][i], f"anchor {i}")
+    #             plot_spectrogram(ex["positive"][i], f"positive {i}")
 
     #         print("--------------------------------------------------")

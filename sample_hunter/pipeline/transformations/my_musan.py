@@ -17,11 +17,29 @@ class MusanException(BaseException):
 class MyMusan(torch.utils.data.Dataset):
     """A wrapper around torchaudio.prototype.datasets.Musan to do some extra preprocessing before yielding samples"""
 
-    def __init__(self, root: Path, subset: str, config: PreprocessConfig | None = None):
-        self.config = config or PreprocessConfig()
+    def __init__(
+        self,
+        root: Path,
+        subset: str,
+        sample_rate: int | None = None,
+        spec_num_sec: float | None = None,
+        volume_threshold: int | None = None,
+    ):
+        if not sample_rate or not spec_num_sec or not volume_threshold:
+            default_config = PreprocessConfig()
+            self.sample_rate = sample_rate or default_config.sample_rate
+            self.spec_num_sec = spec_num_sec or default_config.spec_num_sec
+            self.spec_num_samples = int(self.spec_num_sec * self.sample_rate)
+            self.volume_threshold = volume_threshold or default_config.volume_threshold
+        else:
+            self.sample_rate = sample_rate
+            self.spec_num_sec = spec_num_sec
+            self.spec_num_samples = int(self.sample_rate * self.spec_num_sec)
+            self.volume_threshold = volume_threshold
+
         self.musan = Musan(root, subset=subset)
         self.resample = torchaudio.transforms.Resample(
-            _MUSAN_ORIGINAL_SAMPLE_RATE, self.config.sample_rate
+            _MUSAN_ORIGINAL_SAMPLE_RATE, self.sample_rate
         )
 
     def __len__(self):
@@ -40,9 +58,9 @@ class MyMusan(torch.utils.data.Dataset):
         signal = self.resample(signal)
         signal = create_windows(
             signal,
-            window_num_samples=self.config.spec_num_samples,
-            step_num_samples=self.config.spec_num_samples,
+            window_num_samples=self.spec_num_samples,
+            step_num_samples=self.spec_num_samples,
         )  # we don't want these to be overlaying
-        signal = remove_low_volume_windows(signal, self.config.volume_threshold)
+        signal = remove_low_volume_windows(signal, self.volume_threshold)
 
         return signal, name

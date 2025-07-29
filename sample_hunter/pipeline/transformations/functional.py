@@ -82,8 +82,13 @@ def dbfs(signal: torch.Tensor) -> torch.Tensor:
     """
     Convert an audio signal to dbfs scale, for determining the absolute power of the signal
 
-    signal: an audio tensor that is normalized to (-1, 1)
+    signal: an audio tensor that is normalized to (-1, 1) with shape (B?, 1, S) where
+    B is optional batch size and S is num samples
     """
+    if signal.ndim == 2:
+        # reshape it to have a batch size of 1
+        signal = signal.unsqueeze(0)
+
     ref = 1.0  # full scale for normalized audio
     eps = 1e-10  # to avoid log(0)
     window_rms = signal.square().mean(dim=(1, 2)).sqrt() + eps
@@ -99,15 +104,15 @@ def remove_low_volume_windows(signal: torch.Tensor, vol_threshold: int) -> torch
     passed signal unmodified
     """
     signal_dbfs = dbfs(signal)
-    signals_above_threshold = signal_dbfs > vol_threshold
-    if len(signals_above_threshold) == 0:
+    signals_below_threshold = signal_dbfs < vol_threshold
+    if signals_below_threshold.all():
         warnings.warn(
             "No windows were found to be above the threshold. "
             "Returning the original signal unmodified."
         )
         return signal
 
-    return signal[signals_above_threshold]
+    return signal[~signals_below_threshold]
 
 
 def offset(
