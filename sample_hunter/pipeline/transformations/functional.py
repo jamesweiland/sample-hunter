@@ -96,6 +96,32 @@ def dbfs(signal: torch.Tensor) -> torch.Tensor:
     return dbfs
 
 
+def remove_low_volume(
+    signal: torch.Tensor, step_num_samples: int, vol_threshold: int
+) -> torch.Tensor:
+    """
+    Like `remove_low_volume_windows`, but takes a full signal instead of a batch of windows
+
+    signal: a tensor of shape (1, S) representing a full audio song
+
+    step_num_samples: the step to use for creating the windows that will be removed and then concatenated back together
+
+    vol_threshold: the threshold to remove all windows with a dbfs less than it
+    """
+    windows = signal.unfold(1, step_num_samples, step_num_samples)  # (1, W, step)
+
+    windows = windows.squeeze(0).unsqueeze(1)  # (W, 1, step)
+
+    windows = remove_low_volume_windows(windows, vol_threshold)
+
+    # cat windows back together
+    windows = windows.flatten()  # (S_new,)
+
+    windows = windows.unsqueeze(0)  # (1, S_new)
+
+    return windows
+
+
 def remove_low_volume_windows(signal: torch.Tensor, vol_threshold: int) -> torch.Tensor:
     """
     signal is a batch of windows with size (W, 1, S), W is number of windows that represents the song
@@ -103,19 +129,37 @@ def remove_low_volume_windows(signal: torch.Tensor, vol_threshold: int) -> torch
     note: if there are no windows above the threshold, this function will return the
     passed signal unmodified
     """
-    signal_dbfs = dbfs(signal)
-    signals_below_threshold = signal_dbfs < vol_threshold
-    if signals_below_threshold.all():
-        warnings.warn(
-            "No windows were found to be above the threshold. "
-            "Returning the original signal unmodified."
-        )
-        return signal
+    with torch.no_grad():
+        signal_dbfs = dbfs(signal)
+        signals_below_threshold = signal_dbfs < vol_threshold
+        if signals_below_threshold.all():
+            warnings.warn(
+                "No windows were found to be above the threshold. "
+                "Returning the original signal unmodified."
+            )
+            return signal
 
-    return signal[~signals_below_threshold]
+        return signal[~signals_below_threshold]
 
 
-def offset(
+def offset(signal: torch.Tensor, offset_num_samples: int) -> torch.Tensor:
+    """
+    offset a signal of shape (1, S) by offset_num_samples amount
+
+    if offset_num_samples is negative, signal will be left shifted, otherwise it'll be right shifted
+    """
+
+    if offset_num_samples < 0:
+        offset_signal = signal[:, abs(offset_num_samples) :]
+    elif offset_num_samples > 0:
+        offset_signal = torch.nn.functional.pad(signal, (offset_num_samples, 0))
+    else:
+        offset_signal = signal
+
+    return offset_signal
+
+
+def offset_with_span(
     signal: torch.Tensor, span_num_samples: int, step_num_samples: int
 ) -> List[torch.Tensor]:
     """
@@ -127,13 +171,9 @@ def offset(
     for offset_num_samples in range(
         -span_num_samples, span_num_samples + step_num_samples, step_num_samples
     ):
-        if offset_num_samples < 0:
-            offset = signal[:, abs(offset_num_samples) :]
-        elif offset_num_samples > 0:
-            offset = torch.nn.functional.pad(signal, (offset_num_samples, 0))
-        else:
-            offset = signal
-        results.append(offset)
+        offset_signal = offset(signal, offset_num_samples)
+
+        results.append(offset_signal)
     return results
 
 

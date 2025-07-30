@@ -5,7 +5,7 @@ import torch
 
 from functools import cached_property
 
-from .functional import remove_low_volume_windows
+from .functional import create_windows, offset
 from .my_musan import MusanException, MyMusan
 from .batched_pitch_perturbation import BatchedPitchPerturbation
 from .batched_time_stretch_perturbation import BatchedTimeStretchPerturbation
@@ -91,7 +91,7 @@ class Obfuscator:
         with torch.no_grad():
             batch = batch.contiguous() if not batch.is_contiguous() else batch
 
-            batch = self.offset(batch)
+            batch = self.make_offset_windows(batch)
 
             batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)
@@ -101,29 +101,23 @@ class Obfuscator:
 
             return batch
 
-    def offset(self, signal: torch.Tensor) -> torch.Tensor:
-        """Randomly offset (misalign) every window in the signal"""
-        offsets = torch.randint(
-            -self.config.offset_span_num_samples,
-            self.config.offset_span_num_samples,
-            (signal.shape[0],),
-            device=signal.device,
+    def make_offset_windows(self, signal: torch.Tensor) -> torch.Tensor:
+        """
+        Randomly offset a signal with shape (1, S), and then create windows.
+
+        Returns a tensor with shape (W, 1, spec_num_samples) where W is number of windows
+        """
+        offset_num_samples = random.randint(
+            -self.config.offset_span_num_samples, self.config.offset_span_num_samples
         )
 
-        idx = torch.arange(signal.shape[-1], device=signal.device).unsqueeze(0)
+        offset_signal = offset(signal, offset_num_samples)
 
-        input_indices = idx - offsets.unsqueeze(1)  # broadcast offsets to each batch
-
-        # now, pad input_indices by marking those that are out of bounds, and zero-clamp
-        valid_mask = (input_indices >= 0) & (input_indices < signal.shape[-1])
-        valid_mask = valid_mask.unsqueeze(1)
-        input_indices_clamped = input_indices.clamp(0, signal.shape[-1] - 1).unsqueeze(
-            1
+        windows = create_windows(
+            offset_signal, self.config.spec_num_samples, self.config.step_num_samples
         )
-        shifted = torch.gather(signal, dim=2, index=input_indices_clamped)
-        shifted[~valid_mask] = 0
 
-        return shifted
+        return windows
 
     def apply_filter(self, signal: torch.Tensor) -> torch.Tensor:
         """Apply either a high or low pass filter to `signal`."""

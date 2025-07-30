@@ -12,10 +12,11 @@ DEFAULT_N_FFT: int = 1024
 DEFAULT_HOP_LENGTH: int = 512
 DEFAULT_N_MELS: int = 64
 DEFAULT_SPEC_NUM_SEC: float = 1.0
+DEFAULT_STEP_NUM_SEC: float = 0.5
 DEFAULT_SAMPLE_RATE: int = 44_100
 DEFAULT_EMBEDDING_DIM: int = 128
 DEFAULT_TRIPLET_LOSS_MARGIN: float = 0.2
-DEFAULT_TOP_K: int = 10
+DEFAULT_TOP_K: int = 20
 DEFAULT_VOLUME_THRESHOLD: int = -50  # dbfs, remove anything below this
 
 DEFAULT_REPO_ID: str = "samplr/songs"
@@ -121,11 +122,20 @@ class ObfuscatorConfig(YAMLConfig):
     n_fft: int = DEFAULT_N_FFT
     hop_length: int = DEFAULT_HOP_LENGTH
     spec_num_sec: float = DEFAULT_SPEC_NUM_SEC
+    step_num_sec: float = DEFAULT_STEP_NUM_SEC
     volume_threshold: int = DEFAULT_VOLUME_THRESHOLD
 
     @property
     def offset_span_num_samples(self) -> int:
         return int(self.sample_rate * self.offset_span)
+
+    @property
+    def spec_num_samples(self) -> int:
+        return int(self.sample_rate * self.spec_num_sec)
+
+    @property
+    def step_num_samples(self) -> int:
+        return int(self.sample_rate * self.step_num_sec)
 
 
 @dataclass
@@ -146,7 +156,7 @@ class PreprocessConfig(YAMLConfig):
     n_fft: int = DEFAULT_N_FFT
     hop_length: int = DEFAULT_HOP_LENGTH
     n_mels: int = DEFAULT_N_MELS
-    step_num_sec: float = 0.5
+    step_num_sec: float = DEFAULT_STEP_NUM_SEC
     spec_num_sec: float = DEFAULT_SPEC_NUM_SEC
     volume_threshold: int = DEFAULT_VOLUME_THRESHOLD  # dB
     offset_span: float = 0.5  # offset audio from -span to span for each window
