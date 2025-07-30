@@ -163,7 +163,8 @@ class FunkyFinderPipeline(Pipeline):
         Expects input_tensors to be a dictionary with two keys: "tensors" mapping to a list of tensors, and "song_id" mapping to an int
         """
         with torch.no_grad():
-            model_outputs = [self.model(offset) for offset in input_tensors["tensors"]]
+            # model_outputs = [self.model(offset) for offset in input_tensors["tensors"]]
+            model_outputs = self.model(input_tensors["tensors"])
 
         return cast(
             ModelOutput,
@@ -179,28 +180,40 @@ class FunkyFinderPipeline(Pipeline):
 
         config = PostprocessConfig().merge_kwargs(**postprocess_parameters)
 
-        was_candidate = False
-        for embedding in embeddings:
-            D, I = index.search(embedding, config.top_k)  # type: ignore
-            for neighbors in I:
-                for neighbor in neighbors:
-                    predicted_song_id = metadata[metadata["snippet_id"] == neighbor][
-                        "song_id"
-                    ].tolist()[0]
+        D, I = index.search(embeddings, config.top_k)
+        print(I.shape)
+        for neighbors in I:
+            for neighbor in neighbors:
+                predicted_song_id = metadata[metadata["snippet_id"] == neighbor][
+                    "song_id"
+                ].to_list()[0]
+                if predicted_song_id == model_outputs["song_id"]:
+                    return {"song_id": -1, "score": -1, "was_candidate": True}
 
-                    if predicted_song_id == model_outputs["song_id"]:
-                        was_candidate = True
-                        break
-                if was_candidate:
-                    break
+        return {"song_id": -1, "score": -1, "was_candidate": False}
 
-        candidate, score = infer_with_offset(
-            embeddings=embeddings,
-            index=index,
-            metadata=metadata,
-            gt=None,
-            config=config,
-        )
+        # was_candidate = False
+        # for embedding in embeddings:
+        #     D, I = index.search(embedding, config.top_k)  # type: ignore
+        #     for neighbors in I:
+        #         for neighbor in neighbors:
+        #             predicted_song_id = metadata[metadata["snippet_id"] == neighbor][
+        #                 "song_id"
+        #             ].tolist()[0]
+
+        #             if predicted_song_id == model_outputs["song_id"]:
+        #                 was_candidate = True
+        #                 break
+        #         if was_candidate:
+        #             break
+
+        # candidate, score = infer_with_offset(
+        #     embeddings=embeddings,
+        #     index=index,
+        #     metadata=metadata,
+        #     gt=None,
+        #     config=config,
+        # )
 
         return {"song_id": candidate, "score": score, "was_candidate": was_candidate}
 
@@ -208,9 +221,11 @@ class FunkyFinderPipeline(Pipeline):
 if __name__ == "__main__":
     # test the pipeline
     metadata = pd.read_csv("./_data/dev_metadata.csv")
-    pipe = FunkyFinderPipeline("./_data/7-18-2025-1.pth", "./_data/dev.faiss", metadata)
+    pipe = FunkyFinderPipeline("./_data/7-29-2025-1.pth", "./_data/dev.faiss", metadata)
     dataset = cast(wds.WebDataset, load_webdataset("samplr/songs", "validation"))
 
+    total_correct = 0
+    len_dataset = 0
     for ex in dataset:
         title = ex["json"]["title"]
         print(title)
@@ -223,10 +238,14 @@ if __name__ == "__main__":
             print("it worked")
         else:
             print("it didn't work")
-            print(
-                f"it thought {title} was {metadata[metadata["song_id"] == result["song_id"]]["song_title"].iloc[0]}"
-            )
-            if result["was_candidate"]:
-                print("However, the correct song was a candidate")
+            # print(
+            #     f"it thought {title} was {metadata[metadata["song_id"] == result["song_id"]]["song_title"].iloc[0]}"
+            # )
+        if result["was_candidate"]:
+            print("However, the correct song was a candidate")
+            total_correct += 1
         print(f"gt id: {song_id}")
         print(f"predicted id: {result["song_id"]}")
+        len_dataset += 1
+
+    print(f"correctly identified candidates: {total_correct / len_dataset}")
