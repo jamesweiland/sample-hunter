@@ -51,8 +51,10 @@ def create_validation_shards(
             "positive_duration": positive_duration,
             "ground_path": new_ground_name,
             "positive_path": new_positive_name,
-            "ground_id": row["sampled"],
-            "positive_id": row["sampling"],
+            "ground_song_id": row["sampled"],
+            "positive_song_id": row["sampling"],
+            "ground_unique_id": row["ground"],
+            "positive_unique_id": row["positive"],
         }
         metadata_bytes = json.dumps(metadata).encode("utf-8")
         mp3_size = ground_path.stat().st_size + positive_path.stat().st_size
@@ -92,6 +94,9 @@ if __name__ == "__main__":
     )
     df["sampled_name"] = df["path"].map(lambda p: Path(p).stem)
 
+    assert df["positive_name"].isna().sum() == 0
+    assert df["sampled_name"].isna().sum() == 0
+
     sampling_id_map = {v: i for i, v in enumerate(df["positive_name"].unique())}
     sampled_id_map = {
         v: i + len(df["positive_name"].unique())
@@ -100,5 +105,20 @@ if __name__ == "__main__":
 
     df["sampling"] = df["positive_name"].map(sampling_id_map)
     df["sampled"] = df["sampled_name"].map(sampled_id_map)
+
+    for sampling_id in df["sampling"].unique():
+        unique_names = df.loc[df["sampling"] == sampling_id]["positive_name"].unique()
+        assert (
+            len(unique_names) == 1
+        ), f"Sampling ID {sampling_id} maps to multiple positive names: {unique_names}"
+
+    # Check uniqueness for sampled ids
+    for sampled_id in df["sampled"].unique():
+        unique_names = df.loc[df["sampled"] == sampled_id]["sampled_name"].unique()
+        assert (
+            len(unique_names) == 1
+        ), f"Sampled ID {sampled_id} maps to multiple sampled names: {unique_names}"
+
+    print("made it through the assertions")
 
     create_validation_shards(df, Path("_data/validation-shards"))
