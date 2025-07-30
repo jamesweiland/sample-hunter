@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, cast
 import torch
 import torch.nn as nn
 import webdataset as wds
@@ -9,7 +9,11 @@ from .transformations.functional import resample
 from .evaluate import evaluate_batch
 from .transformations.preprocessor import Preprocessor
 from .data_loading import load_tensor_from_bytes, load_webdataset
-from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_SAMPLE_RATE
+from sample_hunter.config import (
+    DEFAULT_TRIPLET_LOSS_MARGIN,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_REPO_ID,
+)
 from sample_hunter._util import (
     DEVICE,
     HF_TOKEN,
@@ -66,7 +70,9 @@ def validate(
                 anchors = batch["anchor_tensor"]
                 positives = batch["positive_tensor"]
 
-                keys = [batch["json"]["title"]] * anchors.shape[0]
+                assert anchors.shape[0] == positives.shape[0]
+
+                keys = [batch["json"]["ground_song_id"]] * anchors.shape[0]
 
                 anchor_audio, anchor_sr = load_tensor_from_bytes(batch["a.mp3"])
                 positive_audio, positive_sr = load_tensor_from_bytes(batch["b.mp3"])
@@ -90,14 +96,10 @@ def validate(
                 key = keys[0]
                 audio[key] = (anchor_audio, positive_audio)
 
-            # one hot encode all_keys
-            unique_keys = sorted(set(all_keys))
-            key_to_index = {k: i for i, k in enumerate(unique_keys)}
-            all_keys = torch.tensor([key_to_index[k] for k in all_keys])
-
             # properly collate anchors and positives
             all_anchors = torch.cat(all_anchors, dim=0)
             all_positives = torch.cat(all_positives, dim=0)
+            all_keys = torch.tensor(all_keys)
 
             assert (
                 all_anchors.shape == all_positives.shape
@@ -116,13 +118,28 @@ def validate(
             )
 
             if debug:
-                for i in range(res.shape[0]):  # type: ignore
-                    if res[i] == False:  # type: ignore
-                        print(f"Example {i} failed")
-                        key = all_keys[i].item()
-                        print(f"Part of song {key}")
-                        play_tensor_audio(audio[key][0], message="Playing anchor...")
-                        play_tensor_audio(audio[key][1], message="Playing positive...")
+                # for i in range(res.shape[0]):  # type: ignore
+                #     if res[i] == False:  # type: ignore
+                #         print(f"Example {i} failed")
+                #         key = all_keys[i].item()
+                #         print(f"Part of song {key}")
+                #         play_tensor_audio(audio[key][0], message="Playing anchor...")
+                #         play_tensor_audio(audio[key][1], message="Playing positive...")
+
+                res = cast(torch.Tensor, res)
+                keys_with_all_failures = []
+                unique_keys = torch.unique(all_keys)
+                for k in unique_keys:
+                    mask = k == all_keys
+                    if torch.all(~res[mask]):
+                        keys_with_all_failures.append(k)
+
+                print(
+                    f"Number of keys that completely failed: {len(keys_with_all_failures)}"
+                )
+                print(
+                    f"Percentage of keys that completely failed: {len(keys_with_all_failures) / len(unique_keys):.2%}"
+                )
 
                 accuracy = res.float().mean().item()  # type: ignore
             else:
@@ -146,7 +163,7 @@ def parse_args() -> argparse.Namespace:
         "--repo-id",
         type=str,
         help="The HF repo id to use",
-        default=default_config.hf.repo_id,
+        default=DEFAULT_REPO_ID,
     )
 
     parser.add_argument(
@@ -170,7 +187,9 @@ if __name__ == "__main__":
 
     model = load_model(args.model)
 
-    dataset = load_webdataset(args.repo_id, "validation", args.token)
+    dataset = cast(
+        wds.WebDataset, load_webdataset(args.repo_id, "validation", args.token)
+    )
 
     accuracy, batch_size = validate(model, dataset, debug=args.debug)
     print(f"Average validation accuracy: {accuracy}")

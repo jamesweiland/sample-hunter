@@ -15,7 +15,7 @@ from .encoder_net import EncoderNet
 from .data_loading import collate_spectrograms, flatten_sub_batches
 from .transformations.obfuscator import Obfuscator
 from .transformations.preprocessor import Preprocessor
-from .triplet_loss import triplet_accuracy, mine_negative_triplet
+from .triplet_loss import triplet_accuracy, mine_negative
 from .evaluate import evaluate
 from sample_hunter.config import (
     PreprocessConfig,
@@ -35,6 +35,7 @@ def train_single_epoch(
     model: nn.Module,
     dataloader: DataLoader,
     loss_fn: Callable[..., Tensor],
+    mine_strategy: str,
     optimizer: torch.optim.Optimizer,
     device: str,
     alpha: float,
@@ -59,10 +60,11 @@ def train_single_epoch(
         positive_embeddings = model(positive_batch)
 
         # mine the negative embedding
-        negative_embeddings = mine_negative_triplet(
+        negative_embeddings = mine_negative(
             anchor_embeddings=anchor_embeddings,
             positive_embeddings=positive_embeddings,
             song_ids=keys,
+            mine_strategy=mine_strategy,
             alpha=alpha,
         )
         # calculate loss
@@ -104,6 +106,7 @@ def train(
     model: nn.Module,
     train_dataloader: DataLoader,
     loss_fn: Callable,
+    mine_strategy: str,
     optimizer: torch.optim.Optimizer,
     num_epochs: range,
     alpha: float,
@@ -161,6 +164,7 @@ def train(
             model=model,
             dataloader=train_dataloader,
             loss_fn=loss_fn,
+            mine_strategy=mine_strategy,
             optimizer=optimizer,
             device=device,
             alpha=alpha,
@@ -363,6 +367,7 @@ if __name__ == "__main__":
             test_dataloader=test_dataloader,
             optimizer=adam,
             loss_fn=triplet_loss,
+            mine_strategy=train_config.mine_strategy,
             log_dir=train_config.tensorboard_log_dir,
             tensorboard=train_config.tensorboard,
             device=DEVICE,

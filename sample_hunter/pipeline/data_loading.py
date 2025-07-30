@@ -111,6 +111,20 @@ def extract_numbers_and_padding(tar_files: List[str], split: str):
     return numbers, padding
 
 
+def build_pipe(repo_id: str, split: str, token: str = HF_TOKEN) -> str:
+    tar_files = get_tar_files(repo_id, split, token)
+    numbers, padding = extract_numbers_and_padding(tar_files, split)
+    assert padding is not None
+    min_num_str = str(min(numbers)).zfill(padding)
+    max_num_str = str(max(numbers)).zfill(padding)
+    pattern = f"{split}-{{{min_num_str}..{max_num_str}}}.tar"
+
+    url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{split}/{pattern}"
+    pipe = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {token}'"
+
+    return pipe
+
+
 def load_webdataset(
     repo_id: str,
     split: str | List[str],
@@ -138,17 +152,3 @@ def load_webdataset(
             )
             datasets.update({s: dataset})
         return datasets
-
-
-def build_pipe(repo_id: str, split: str, token: str = HF_TOKEN) -> str:
-    tar_files = get_tar_files(repo_id, split, token)
-    numbers, padding = extract_numbers_and_padding(tar_files, split)
-    assert padding is not None
-    min_num_str = str(min(numbers)).zfill(padding)
-    max_num_str = str(max(numbers)).zfill(padding)
-    pattern = f"{split}-{{{min_num_str}..{max_num_str}}}.tar"
-
-    url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{split}/{pattern}"
-    pipe = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {token}'"
-
-    return pipe

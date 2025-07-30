@@ -2,10 +2,10 @@ import torch.nn as nn
 import torch
 from torch.utils.data import DataLoader
 
-from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN
+from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_MINE_STRATEGY
 
 from .data_loading import flatten_sub_batches
-from .triplet_loss import triplet_accuracy, mine_negative_triplet
+from .triplet_loss import triplet_accuracy, mine_negative
 from sample_hunter._util import DEVICE
 
 
@@ -49,6 +49,7 @@ def evaluate_batch(
     positive: torch.Tensor,
     song_ids: torch.Tensor,
     anchor: torch.Tensor,
+    mine_strategy: str = DEFAULT_MINE_STRATEGY,
     alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN,
     device: str = DEVICE,
     debug: bool = False,
@@ -56,27 +57,30 @@ def evaluate_batch(
     """
     Evaluate a single batch of tensors, and return the average triplet accuracy of the batch
     """
+    assert mine_strategy in ["semi", "hard"]
+    with torch.no_grad():
 
-    model.eval()
-    positive, anchor = positive.to(device), anchor.to(device)
+        model.eval()
+        positive, anchor = positive.to(device), anchor.to(device)
 
-    positive_embeddings = model(positive)
-    anchor_embeddings = model(anchor)
+        positive_embeddings = model(positive)
+        anchor_embeddings = model(anchor)
 
-    negative_embeddings = mine_negative_triplet(
-        anchor_embeddings=anchor_embeddings,
-        positive_embeddings=positive_embeddings,
-        song_ids=song_ids,
-        alpha=alpha,
-    )
+        negative_embeddings = mine_negative(
+            song_ids,
+            positive_embeddings,
+            anchor_embeddings,
+            mine_strategy=mine_strategy,
+            alpha=alpha,
+        )
 
-    res = triplet_accuracy(
-        anchor=anchor_embeddings,
-        positive=positive_embeddings,
-        negative=negative_embeddings,
-        alpha=alpha,
-        debug=debug,
-    )
-    if debug:
-        print(f"Result shape: {res.shape}")  # type: ignore
-    return res
+        res = triplet_accuracy(
+            anchor=anchor_embeddings,
+            positive=positive_embeddings,
+            negative=negative_embeddings,
+            alpha=alpha,
+            debug=debug,
+        )
+        if debug:
+            print(f"Result shape: {res.shape}")  # type: ignore
+        return res

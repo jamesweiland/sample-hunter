@@ -108,7 +108,9 @@ def remove_low_volume(
 
     vol_threshold: the threshold to remove all windows with a dbfs less than it
     """
-    windows = signal.unfold(1, step_num_samples, step_num_samples)  # (1, W, step)
+    windows = signal.unfold(
+        1, min(step_num_samples, signal.shape[1]), step_num_samples
+    )  # (1, W, step)
 
     windows = windows.squeeze(0).unsqueeze(1)  # (W, 1, step)
 
