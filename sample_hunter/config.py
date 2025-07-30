@@ -1,3 +1,4 @@
+from typing_extensions import Literal
 import torchaudio
 from functools import cached_property
 from dataclasses import InitVar, dataclass, fields, field, replace, asdict
@@ -16,6 +17,7 @@ DEFAULT_STEP_NUM_SEC: float = 0.5
 DEFAULT_SAMPLE_RATE: int = 44_100
 DEFAULT_EMBEDDING_DIM: int = 128
 DEFAULT_TRIPLET_LOSS_MARGIN: float = 0.2
+DEFAULT_MINE_STRATEGY: str = "semi"
 DEFAULT_TOP_K: int = 20
 DEFAULT_VOLUME_THRESHOLD: int = -60  # dbfs, remove anything below this
 
@@ -148,6 +150,7 @@ class TrainConfig(YAMLConfig):
     tensorboard_log_dir: Path = Path("/home/james/code/sample-hunter/_data/logs")
     tensorboard: str = "epoch"  # can be "none", "batch", or "epoch"
     cache_dir: Path = Path(DEFAULT_CACHE_DIR)
+    mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY
 
 
 @dataclass
