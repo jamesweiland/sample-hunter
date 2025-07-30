@@ -180,7 +180,7 @@ class FunkyFinderPipeline(Pipeline):
 
         config = PostprocessConfig().merge_kwargs(**postprocess_parameters)
 
-        D, I = index.search(embeddings, config.top_k)
+        D, I = index.search(embeddings, config.top_k)  # type: ignore
         print(I.shape)
         for neighbors in I:
             for neighbor in neighbors:
@@ -215,13 +215,15 @@ class FunkyFinderPipeline(Pipeline):
         #     config=config,
         # )
 
-        return {"song_id": candidate, "score": score, "was_candidate": was_candidate}
+        # return {"song_id": candidate, "score": score, "was_candidate": was_candidate}
 
 
 if __name__ == "__main__":
     # test the pipeline
     metadata = pd.read_csv("./_data/dev_metadata.csv")
-    pipe = FunkyFinderPipeline("./_data/7-29-2025-1.pth", "./_data/dev.faiss", metadata)
+    pipe = FunkyFinderPipeline(
+        "./_data/7-29-2025b-1.pth", "./_data/dev.faiss", metadata
+    )
     dataset = cast(wds.WebDataset, load_webdataset("samplr/songs", "validation"))
 
     total_correct = 0

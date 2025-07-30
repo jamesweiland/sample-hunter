@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, cast
 import torch
 import torch.nn as nn
 import webdataset as wds
@@ -70,7 +70,9 @@ def validate(
                 anchors = batch["anchor_tensor"]
                 positives = batch["positive_tensor"]
 
-                keys = [batch["json"]["title"]] * anchors.shape[0]
+                assert anchors.shape[0] == positives.shape[0]
+
+                keys = [batch["json"]["ground_song_id"]] * anchors.shape[0]
 
                 anchor_audio, anchor_sr = load_tensor_from_bytes(batch["a.mp3"])
                 positive_audio, positive_sr = load_tensor_from_bytes(batch["b.mp3"])
@@ -94,14 +96,10 @@ def validate(
                 key = keys[0]
                 audio[key] = (anchor_audio, positive_audio)
 
-            # one hot encode all_keys
-            unique_keys = sorted(set(all_keys))
-            key_to_index = {k: i for i, k in enumerate(unique_keys)}
-            all_keys = torch.tensor([key_to_index[k] for k in all_keys])
-
             # properly collate anchors and positives
             all_anchors = torch.cat(all_anchors, dim=0)
             all_positives = torch.cat(all_positives, dim=0)
+            all_keys = torch.tensor(all_keys)
 
             assert (
                 all_anchors.shape == all_positives.shape
@@ -128,6 +126,7 @@ def validate(
                 #         play_tensor_audio(audio[key][0], message="Playing anchor...")
                 #         play_tensor_audio(audio[key][1], message="Playing positive...")
 
+                res = cast(torch.Tensor, res)
                 keys_with_all_failures = []
                 unique_keys = torch.unique(all_keys)
                 for k in unique_keys:
@@ -139,7 +138,7 @@ def validate(
                     f"Number of keys that completely failed: {len(keys_with_all_failures)}"
                 )
                 print(
-                    f"Percentage of keys that completedly failed: {len(keys_with_all_failures) / len(unique_keys):.2%}"
+                    f"Percentage of keys that completely failed: {len(keys_with_all_failures) / len(unique_keys):.2%}"
                 )
 
                 accuracy = res.float().mean().item()  # type: ignore
@@ -188,7 +187,9 @@ if __name__ == "__main__":
 
     model = load_model(args.model)
 
-    dataset = load_webdataset(args.repo_id, "validation", args.token)
+    dataset = cast(
+        wds.WebDataset, load_webdataset(args.repo_id, "validation", args.token)
+    )
 
     accuracy, batch_size = validate(model, dataset, debug=args.debug)
     print(f"Average validation accuracy: {accuracy}")
