@@ -9,7 +9,11 @@ from .transformations.functional import resample
 from .evaluate import evaluate_batch
 from .transformations.preprocessor import Preprocessor
 from .data_loading import load_tensor_from_bytes, load_webdataset
-from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_SAMPLE_RATE
+from sample_hunter.config import (
+    DEFAULT_TRIPLET_LOSS_MARGIN,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_REPO_ID,
+)
 from sample_hunter._util import (
     DEVICE,
     HF_TOKEN,
@@ -116,13 +120,27 @@ def validate(
             )
 
             if debug:
-                for i in range(res.shape[0]):  # type: ignore
-                    if res[i] == False:  # type: ignore
-                        print(f"Example {i} failed")
-                        key = all_keys[i].item()
-                        print(f"Part of song {key}")
-                        play_tensor_audio(audio[key][0], message="Playing anchor...")
-                        play_tensor_audio(audio[key][1], message="Playing positive...")
+                # for i in range(res.shape[0]):  # type: ignore
+                #     if res[i] == False:  # type: ignore
+                #         print(f"Example {i} failed")
+                #         key = all_keys[i].item()
+                #         print(f"Part of song {key}")
+                #         play_tensor_audio(audio[key][0], message="Playing anchor...")
+                #         play_tensor_audio(audio[key][1], message="Playing positive...")
+
+                keys_with_all_failures = []
+                unique_keys = torch.unique(all_keys)
+                for k in unique_keys:
+                    mask = k == all_keys
+                    if torch.all(~res[mask]):
+                        keys_with_all_failures.append(k)
+
+                print(
+                    f"Number of keys that completely failed: {len(keys_with_all_failures)}"
+                )
+                print(
+                    f"Percentage of keys that completedly failed: {len(keys_with_all_failures) / len(unique_keys):.2%}"
+                )
 
                 accuracy = res.float().mean().item()  # type: ignore
             else:
@@ -146,7 +164,7 @@ def parse_args() -> argparse.Namespace:
         "--repo-id",
         type=str,
         help="The HF repo id to use",
-        default=default_config.hf.repo_id,
+        default=DEFAULT_REPO_ID,
     )
 
     parser.add_argument(
