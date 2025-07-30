@@ -11,8 +11,7 @@ from .obfuscator import Obfuscator
 from .functional import (
     create_windows,
     mix_channels,
-    offset,
-    remove_low_volume_windows,
+    remove_low_volume,
     resample,
 )
 from sample_hunter.config import PreprocessConfig
@@ -134,7 +133,13 @@ class Preprocessor:
         # resample to target sampling rate
         signal = resample(signal, sample_rate, config.sample_rate)
 
+        signal = remove_low_volume(
+            signal, self.config.spec_num_samples, self.config.volume_threshold
+        )
+
         if train:
+            ob_windows = self.obfuscate(signal)
+
             # make windows without overlay for training
             signal = create_windows(
                 signal,
@@ -143,43 +148,50 @@ class Preprocessor:
                 step_num_samples=config.spec_num_samples,
             )
 
-            signal = remove_low_volume_windows(
-                signal, vol_threshold=config.volume_threshold
-            )
-
             anchor = config.mel_spectrogram(signal)
-            positive = config.mel_spectrogram(self.obfuscate_window(signal))
+            positive = config.mel_spectrogram(ob_windows)
 
             return positive, anchor
         else:
             # make a list of audio signals that are offset from
             # -offset_span to offset_span, stepped through by offset_step
-            offsets = offset(
-                signal, config.offset_span_num_samples, config.offset_step_num_samples
-            )
+            # offsets = offset(
+            #     signal, config.offset_span_num_samples, config.offset_step_num_samples
+            # )
 
             # make windows with overlay
-            offsets = [
-                create_windows(
-                    offset,
-                    target_length=target_length,
-                    window_num_samples=config.spec_num_samples,
-                    step_num_samples=config.step_num_samples,
-                )
-                for offset in offsets
-            ]
+            # offsets = [
+            #     create_windows(
+            #         offset,
+            #         target_length=target_length,
+            #         window_num_samples=config.spec_num_samples,
+            #         step_num_samples=config.step_num_samples,
+            #     )
+            #     for offset in offsets
+            # ]
 
-            offsets = [
-                remove_low_volume_windows(offset, vol_threshold=config.volume_threshold)
-                for offset in offsets
-            ]
+            # offsets = [
+            #     remove_low_volume_windows(offset, vol_threshold=config.volume_threshold)
+            #     for offset in offsets
+            # ]
 
-            anchors = [config.mel_spectrogram(offset) for offset in offsets]
+            # anchors = [config.mel_spectrogram(offset) for offset in offsets]
+
+            # return anchors
+
+            signal = create_windows(
+                signal,
+                target_length=target_length,
+                window_num_samples=config.spec_num_samples,
+                step_num_samples=config.step_num_samples,
+            )
+
+            anchor = config.mel_spectrogram(signal)
 
             # if not train, just return the regular transformation
-            return anchors
+            return anchor
 
-    def obfuscate_window(self, signal: torch.Tensor) -> torch.Tensor:
+    def obfuscate(self, signal: torch.Tensor) -> torch.Tensor:
         """
         Obfuscate a segment of an audio file represented as a tensor, and return
         the obfuscation as a tensor.
