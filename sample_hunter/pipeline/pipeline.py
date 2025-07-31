@@ -25,7 +25,6 @@ from sample_hunter.config import (
 from .data_loading import load_tensor_from_bytes, load_webdataset
 from .encoder_net import EncoderNet
 from .transformations.preprocessor import Preprocessor
-from .predict import infer_with_offset
 
 
 class HFAudio(TypedDict):
@@ -72,7 +71,8 @@ class FunkyFinderPipeline(Pipeline):
             self.model = model
         self.model.eval()
         if isinstance(index, Path | str):
-            self.index = faiss.read_index(index)
+            # cast it to a string because faiss doesn't like Paths
+            self.index = faiss.read_index(str(index))
         else:
             self.index = index
         if isinstance(metadata, Path | str):
@@ -163,8 +163,9 @@ class FunkyFinderPipeline(Pipeline):
         Expects input_tensors to be a dictionary with two keys: "tensors" mapping to a list of tensors, and "song_id" mapping to an int
         """
         with torch.no_grad():
-            # model_outputs = [self.model(offset) for offset in input_tensors["tensors"]]
             model_outputs = self.model(input_tensors["tensors"])
+            print(f'shape of inputs: {input_tensors["tensors"].shape}')
+            print(f"shape of outputs: {model_outputs.shape}")
 
         return cast(
             ModelOutput,
@@ -177,18 +178,27 @@ class FunkyFinderPipeline(Pipeline):
             pd.DataFrame, postprocess_parameters.get("metadata") or self.metadata
         )
         embeddings = model_outputs["tensors"]
+        ground_song_id = model_outputs["song_id"]
 
         config = PostprocessConfig().merge_kwargs(**postprocess_parameters)
 
         D, I = index.search(embeddings, config.top_k)  # type: ignore
         print(I.shape)
-        for neighbors in I:
-            for neighbor in neighbors:
-                predicted_song_id = metadata[metadata["snippet_id"] == neighbor][
-                    "song_id"
-                ].to_list()[0]
-                if predicted_song_id == model_outputs["song_id"]:
-                    return {"song_id": -1, "score": -1, "was_candidate": True}
+        for i in range(I.shape[0]):
+            neighbors = I[i]
+            print(f"neighbors shape: {neighbors.shape}")
+            # get all unique song ids in neighbors
+            unique_song_ids = metadata[metadata["snippet_id"].isin(neighbors)][
+                "song_id"
+            ].unique()
+            if ground_song_id in unique_song_ids:
+                return {"song_id": -1, "score": -1, "was_candidate": True}
+            else:
+                print(f"predicted song ids: {unique_song_ids}")
+                predicted_songs = metadata[metadata["song_id"].isin(unique_song_ids)][
+                    "song_title"
+                ].unique()
+                print(f"predicted songs: {predicted_songs}")
 
         return {"song_id": -1, "score": -1, "was_candidate": False}
 
@@ -220,23 +230,53 @@ class FunkyFinderPipeline(Pipeline):
 
 if __name__ == "__main__":
     # test the pipeline
-    metadata = pd.read_csv("./_data/dev_metadata.csv")
-    pipe = FunkyFinderPipeline(
-        "./_data/7-29-2025b-1.pth", "./_data/dev.faiss", metadata
+    import argparse
+    from sample_hunter.config import DEFAULT_REPO_ID
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("model", type=Path, help="the path to the model to use")
+    parser.add_argument("index", type=Path, help="the path to the index to use")
+    parser.add_argument("metadata", type=Path, help="the path to the metadata")
+    parser.add_argument(
+        "--repo-id",
+        type=str,
+        help="The HF repo id to test with",
+        default=DEFAULT_REPO_ID,
     )
-    dataset = cast(wds.WebDataset, load_webdataset("samplr/songs", "validation"))
+
+    args = parser.parse_args()
+
+    metadata = pd.read_csv(args.metadata)
+    pipe = FunkyFinderPipeline(args.model, args.index, metadata)
+    dataset = cast(wds.WebDataset, load_webdataset(args.repo_id, "validation"))
 
     total_correct = 0
     len_dataset = 0
     for ex in dataset:
         title = ex["json"]["title"]
         print(title)
-        song_id = metadata[metadata["song_title"] == title]["song_id"].iloc[0]
+        ground_song_id = ex["json"]["ground_song_id"]
 
-        result = cast(dict, pipe({"audio": ex["b.mp3"], "song_id": song_id}))
+        from sample_hunter._util import play_tensor_audio
+        from mutagen.mp3 import MP3
+
+        ground, ground_sr = load_tensor_from_bytes(ex["a.mp3"])
+        positive, positive_sr = load_tensor_from_bytes(ex["b.mp3"])
+
+        play_tensor_audio(ground, message="playing ground...", sample_rate=ground_sr)
+        play_tensor_audio(
+            positive, message="playing positive...", sample_rate=positive_sr
+        )
+
+        seconds_long = positive.shape[-1] / positive_sr
+
+        print(f"positive is {seconds_long:.2f} seconds long")
+        print(f"we should have {((seconds_long - 1)/0.5) + 1:.2f} windows")
+
+        result = cast(dict, pipe({"audio": ex["b.mp3"], "song_id": ground_song_id}))
 
         print(result)
-        if result["song_id"] == song_id:
+        if result["song_id"] == ground_song_id:
             print("it worked")
         else:
             print("it didn't work")
@@ -246,8 +286,9 @@ if __name__ == "__main__":
         if result["was_candidate"]:
             print("However, the correct song was a candidate")
             total_correct += 1
-        print(f"gt id: {song_id}")
+        print(f"gt id: {ground_song_id}")
         print(f"predicted id: {result["song_id"]}")
         len_dataset += 1
+        exit(0)
 
-    print(f"correctly identified candidates: {total_correct / len_dataset}")
+    print(f"correctly identified candidates: {total_correct / len_dataset:.2%}")

@@ -18,7 +18,6 @@ from sample_hunter._util import (
     DEVICE,
     HF_TOKEN,
     load_model,
-    play_tensor_audio,
 )
 
 
