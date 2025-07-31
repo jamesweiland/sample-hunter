@@ -11,6 +11,7 @@ import tarfile
 from sklearn.model_selection import train_test_split
 import ffmpeg
 from tqdm import tqdm
+from uuid import uuid4
 
 SHARD_SIZE = int(1e9)  # bytes
 SONG_COUNTER = 0
@@ -22,8 +23,6 @@ def create_shards(
     """
     Create tar shards
     """
-    global SONG_COUNTER
-
     current_shard = 0
     current_shard_size = 0
     tar = None
@@ -51,7 +50,7 @@ def create_shards(
                 "artist": metadata["format"]["tags"]["artist"],
                 "duration": stream_metadata["duration"],
                 "sample_rate": stream_metadata["sample_rate"],
-                "id": SONG_COUNTER,
+                "id": str(uuid4()),
             }
         ).encode("utf-8")
 
@@ -72,7 +71,6 @@ def create_shards(
         tar.addfile(json_info, fileobj=io.BytesIO(json_bytes))
 
         current_shard_size += mp3_size + json_size
-        SONG_COUNTER += 1
 
     if tar is not None:
         tar.close()
