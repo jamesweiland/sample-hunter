@@ -67,7 +67,7 @@ class Preprocessor:
         target_length: int | None = None,
         sample_rate: int | None = None,
         **kwargs,
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """
         Transform `data` into a mel spectrogram.
 
@@ -112,7 +112,7 @@ class Preprocessor:
         train: bool = False,
         target_length: int | None = None,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor] | List[torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """
         Perform the necessary pre-processing
         operations from a huggingface Audio object
