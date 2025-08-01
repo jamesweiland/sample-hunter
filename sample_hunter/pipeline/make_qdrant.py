@@ -1,20 +1,19 @@
 import torch
 import argparse
 import json
+import webdataset as wds
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
     VectorParams,
     PointStruct,
-    Filter,
-    FieldCondition,
-    MatchValue,
     UpdateStatus,
 )
 from uuid import uuid4
 from typing import Tuple, Dict, Any, cast
 from pathlib import Path
+from tqdm import tqdm
 
 from .transformations.preprocessor import Preprocessor
 from .data_loading import load_tensor_from_bytes
@@ -64,25 +63,54 @@ def prepare_example_for_insertion(
 def insert_song(
     client: QdrantClient, model: EncoderNet, specs: torch.Tensor, **song_metadata
 ) -> bool:
-    embeddings = model(specs)
+    with torch.no_grad():
+        model.eval()
+        embeddings = model(specs)
 
-    # prepare payloads
-    payloads = [None] * embeddings.shape[0]
-    for i in range(embeddings.shape[0]):
-        payloads[i] = song_metadata.copy()
-        payloads[i].update({"order": i})
+        # prepare payloads
+        payloads = [None] * embeddings.shape[0]
+        for i in range(embeddings.shape[0]):
+            payloads[i] = song_metadata.copy()
+            payloads[i].update({"order": i})
 
-    assert None not in payloads
+        assert None not in payloads
 
-    # create points
-    points = [
-        PointStruct(id=str(uuid4()), vector=embeddings[i], payload=payloads[i])
-        for i in range(embeddings.shape[0])
-    ]
+        # create points
+        points = [
+            PointStruct(id=str(uuid4()), vector=embeddings[i], payload=payloads[i])
+            for i in range(embeddings.shape[0])
+        ]
 
-    operation_info = client.upsert(collection_name="dev", wait=True, points=points)
+        operation_info = client.upsert(collection_name="dev", wait=True, points=points)
 
-    return operation_info.status == UpdateStatus.COMPLETED
+        return operation_info.status == UpdateStatus.COMPLETED
+
+
+def make_qdrant(
+    dataset: wds.WebDataset,
+    client: QdrantClient,
+    model: EncoderNet,
+    collection_name: str = "dev",
+    preprocess_config: PreprocessConfig | None = None,
+    **preprocess_kwargs,
+):
+    client.create_collection(
+        collection_name=collection_name,
+        vectors_config=VectorParams(
+            size=model.config.embedding_dim, distance=Distance.EUCLID
+        ),
+    )
+
+    for ex in tqdm(dataset, desc="building db"):
+        if isinstance(ex["json"], bytes):
+            ex["json"] = json.loads(ex["json"].decode("utf-8"))
+
+            specs, metadata = prepare_example_for_insertion(
+                ex, preprocess_config, **preprocess_kwargs
+            )
+
+            if not insert_song(client, model, specs, **metadata):
+                raise RuntimeError(f"{metadata["ground_id"]} failed")
 
 
 def parse_args() -> argparse.Namespace:
@@ -113,9 +141,6 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    import webdataset as wds
-    from tqdm import tqdm
-
     args = parse_args()
 
     if args.config:
@@ -138,21 +163,7 @@ if __name__ == "__main__":
             "./_data/validation-shards/validation/validation-0001.tar"
         )
 
-        # create the qdrant collection
-        client.create_collection(
-            collection_name="dev",
-            vectors_config=VectorParams(
-                size=config.embedding_dim, distance=Distance.EUCLID
-            ),
-        )
-
-        for ex in tqdm(dataset, desc="building db"):
-            ex["json"] = json.loads(ex["json"].decode("utf-8"))
-
-            specs, metadata = prepare_example_for_insertion(ex)
-
-            if not insert_song(client=client, model=model, specs=specs, **metadata):
-                raise RuntimeError(f"{metadata["ground_id"]} failed")
+        make_qdrant(dataset, client, model)
 
         print("done!")
         exit(0)

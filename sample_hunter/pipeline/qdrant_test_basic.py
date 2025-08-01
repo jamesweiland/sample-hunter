@@ -14,7 +14,7 @@ from pathlib import Path
 from .transformations.preprocessor import Preprocessor
 from .data_loading import load_tensor_from_bytes
 from .encoder_net import EncoderNet
-from .make_qdrant import QDRANT_PORT
+from .make_qdrant import make_qdrant
 from sample_hunter.config import (
     EncoderNetConfig,
     PreprocessConfig,
@@ -91,10 +91,17 @@ if __name__ == "__main__":
 
     model = EncoderNet.from_pretrained(args.model, config=config)
 
-    client = QdrantClient(QDRANT_PORT)
+    client = QdrantClient(":memory:")
 
     if args.dev:
         # load validation dataset saved locally
+        dataset = wds.WebDataset(
+            "./_data/validation-shards/validation/validation-0001.tar"
+        )
+
+        make_qdrant(dataset, client, model)
+
+        # we have to reload the dataset since make_qdrant exhausts it
         dataset = wds.WebDataset(
             "./_data/validation-shards/validation/validation-0001.tar"
         )
@@ -105,30 +112,32 @@ if __name__ == "__main__":
             ex["json"] = json.loads(ex["json"].decode("utf-8"))
             specs = prepare_example_for_query(ex)
 
-            embeddings = model(specs)
+            with torch.no_grad():
+                model.eval()
+                embeddings = model(specs)
 
-            requests = [
-                QueryRequest(query=embedding, limit=args.top_k, with_payload=True)
-                for embedding in embeddings
-            ]
+                requests = [
+                    QueryRequest(query=embedding, limit=args.top_k, with_payload=True)
+                    for embedding in embeddings
+                ]
 
-            responses = client.query_batch_points(
-                collection_name="dev", requests=requests
-            )
+                responses = client.query_batch_points(
+                    collection_name="dev", requests=requests
+                )
 
-            found = False
-            for response in responses:
-                # print(result)
-                points = response.points
-                for point in points:
-                    if point.payload["ground_id"] == ex["json"]["ground_id"]:
-                        num_right += 1
-                        found = True
+                found = False
+                for response in responses:
+                    # print(result)
+                    points = response.points
+                    for point in points:
+                        if point.payload["ground_id"] == ex["json"]["ground_id"]:
+                            num_right += 1
+                            found = True
+                            break
+                    if found:
                         break
-                if found:
-                    break
 
-                total += 1
+            total += 1
 
         print(f"Accuracy: {num_right / total:.2%}")
 
