@@ -1,4 +1,6 @@
+import json
 import argparse
+import uuid
 from pathlib import Path
 from typing import Tuple, cast
 import torch
@@ -41,8 +43,11 @@ def validate(
         with Preprocessor() as preprocessor:
 
             def map_fn(ex):
-                anchor, anchor_sr = load_tensor_from_bytes(ex["a.mp3"])
-                positive, positive_sr = load_tensor_from_bytes(ex["b.mp3"])
+                anchor, anchor_sr = load_tensor_from_bytes(ex["ground.mp3"])
+                positive, positive_sr = load_tensor_from_bytes(ex["positive.mp3"])
+
+                if isinstance(ex["json"], bytes):
+                    ex["json"] = json.loads(ex["json"].decode("utf-8"))
 
                 # we resample them out here so we can mess around with the lengths
                 anchor = resample(anchor, anchor_sr, sample_rate)
@@ -71,10 +76,12 @@ def validate(
 
                 assert anchors.shape[0] == positives.shape[0]
 
-                keys = [batch["json"]["ground_song_id"]] * anchors.shape[0]
+                keys = [batch["json"]["ground_id"]] * anchors.shape[0]
 
-                anchor_audio, anchor_sr = load_tensor_from_bytes(batch["a.mp3"])
-                positive_audio, positive_sr = load_tensor_from_bytes(batch["b.mp3"])
+                anchor_audio, anchor_sr = load_tensor_from_bytes(batch["positive.mp3"])
+                positive_audio, positive_sr = load_tensor_from_bytes(
+                    batch["ground.mp3"]
+                )
 
                 return anchors, positives, keys, anchor_audio, positive_audio
 
@@ -95,10 +102,16 @@ def validate(
                 key = keys[0]
                 audio[key] = (anchor_audio, positive_audio)
 
+            # encode uuid keys to ints
+            all_keys = [uuid.UUID(key).int for key in all_keys]
+            # have to map uuids to smaller ints, since torch only supports up to int64
+            uuid_to_int64 = {uuid_: i for i, uuid_ in enumerate(all_keys)}
+            all_keys = [uuid_to_int64[uuid_] for uuid_ in all_keys]
+
             # properly collate anchors and positives
             all_anchors = torch.cat(all_anchors, dim=0)
             all_positives = torch.cat(all_positives, dim=0)
-            all_keys = torch.tensor(all_keys)
+            all_keys = torch.tensor(all_keys, dtype=torch.int64)
 
             assert (
                 all_anchors.shape == all_positives.shape
@@ -111,6 +124,7 @@ def validate(
                 positive=all_positives,
                 song_ids=all_keys,
                 anchor=all_anchors,
+                mine_strategy="hard",
                 alpha=alpha,
                 device=device,
                 debug=debug,
@@ -186,10 +200,8 @@ if __name__ == "__main__":
 
     model = load_model(args.model)
 
-    dataset = cast(
-        wds.WebDataset, load_webdataset(args.repo_id, "validation", args.token)
-    )
+    dataset = wds.WebDataset("./_data/validation-shards/validation/validation-0001.tar")
 
     accuracy, batch_size = validate(model, dataset, debug=args.debug)
-    print(f"Average validation accuracy: {accuracy}")
+    print(f"Average validation accuracy: {accuracy:.2%}")
     print(f"Batch size: {batch_size}")

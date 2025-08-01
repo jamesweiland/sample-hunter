@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 from torch.utils.data import DataLoader
+from typing import Literal
 
 from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_MINE_STRATEGY
 
@@ -49,7 +50,7 @@ def evaluate_batch(
     positive: torch.Tensor,
     song_ids: torch.Tensor,
     anchor: torch.Tensor,
-    mine_strategy: str = DEFAULT_MINE_STRATEGY,
+    mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY,
     alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN,
     device: str = DEVICE,
     debug: bool = False,
