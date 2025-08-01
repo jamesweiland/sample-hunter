@@ -21,7 +21,7 @@ DEFAULT_MINE_STRATEGY: str = "hard"
 DEFAULT_TOP_K: int = 20
 DEFAULT_VOLUME_THRESHOLD: int = -60  # dbfs, remove anything below this
 
-DEFAULT_REPO_ID: str = "samplr/songs"
+DEFAULT_DATASET_REPO: str = "samplr/songs"
 DEFAULT_CACHE_DIR: Path = Path("/home/james/code/sample-hunter/_data/cache")
 
 T = TypeVar("T", bound="YAMLConfig")

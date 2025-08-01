@@ -12,7 +12,7 @@ from .data_loading import load_tensor_from_bytes, load_webdataset
 from sample_hunter.config import (
     DEFAULT_TRIPLET_LOSS_MARGIN,
     DEFAULT_SAMPLE_RATE,
-    DEFAULT_REPO_ID,
+    DEFAULT_DATASET_REPO,
 )
 from sample_hunter._util import (
     DEVICE,
@@ -162,7 +162,7 @@ def parse_args() -> argparse.Namespace:
         "--repo-id",
         type=str,
         help="The HF repo id to use",
-        default=DEFAULT_REPO_ID,
+        default=DEFAULT_DATASET_REPO,
     )
 
     parser.add_argument(

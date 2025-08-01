@@ -22,7 +22,7 @@ from sample_hunter.config import (
     TrainConfig,
     ObfuscatorConfig,
     EncoderNetConfig,
-    DEFAULT_REPO_ID,
+    DEFAULT_DATASET_REPO,
 )
 from sample_hunter._util import (
     DEVICE,
@@ -225,7 +225,7 @@ def parse_args() -> argparse.Namespace:
     hf.add_argument(
         "--repo-id",
         type=str,
-        default=DEFAULT_REPO_ID,
+        default=DEFAULT_DATASET_REPO,
         help="The huggingface repository to use as a training dataset",
     )
 

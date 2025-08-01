@@ -13,7 +13,7 @@ from .data_loading import load_tensor_from_bytes, load_webdataset
 from .transformations.preprocessor import Preprocessor
 from .encoder_net import EncoderNet
 from sample_hunter._util import HF_TOKEN, load_model
-from sample_hunter.config import PostprocessConfig, DEFAULT_TOP_K, DEFAULT_REPO_ID
+from sample_hunter.config import PostprocessConfig, DEFAULT_TOP_K, DEFAULT_DATASET_REPO
 
 
 def validate_vector_search(
@@ -329,7 +329,7 @@ def parse_args() -> argparse.Namespace:
         "--repo-id",
         type=str,
         help="The HF repo id that has data to make predictions on",
-        default=DEFAULT_REPO_ID,
+        default=DEFAULT_DATASET_REPO,
     )
 
     parser.add_argument("--token", type=str, help="Your HF token", default=HF_TOKEN)

@@ -231,7 +231,7 @@ class FunkyFinderPipeline(Pipeline):
 if __name__ == "__main__":
     # test the pipeline
     import argparse
-    from sample_hunter.config import DEFAULT_REPO_ID
+    from sample_hunter.config import DEFAULT_DATASET_REPO
 
     parser = argparse.ArgumentParser()
     parser.add_argument("model", type=Path, help="the path to the model to use")
@@ -241,7 +241,7 @@ if __name__ == "__main__":
         "--repo-id",
         type=str,
         help="The HF repo id to test with",
-        default=DEFAULT_REPO_ID,
+        default=DEFAULT_DATASET_REPO,
     )
 
     args = parser.parse_args()

@@ -20,7 +20,7 @@ from .data_loading import (
 from .transformations.preprocessor import Preprocessor
 from .encoder_net import EncoderNet
 from sample_hunter._util import HF_TOKEN, DEVICE, load_model
-from sample_hunter.config import DEFAULT_EMBEDDING_DIM, DEFAULT_REPO_ID
+from sample_hunter.config import DEFAULT_EMBEDDING_DIM, DEFAULT_DATASET_REPO
 
 
 def build_index(
@@ -159,7 +159,7 @@ def parse_args() -> argparse.Namespace:
         "--repo-id",
         type=str,
         help="The name of the HF dataset to use to generate embeddings",
-        default=DEFAULT_REPO_ID,
+        default=DEFAULT_DATASET_REPO,
     )
 
     parser.add_argument("--token", type=str, help="Your HF token", default=HF_TOKEN)
