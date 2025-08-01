@@ -15,13 +15,17 @@ def triplet_accuracy(
     alpha: float,
     debug: bool = False,
 ) -> float | torch.Tensor:
-    """Calculates the accuracy of the model by returning the ratio of positive embeddings
+    """
+    Calculates the accuracy of the model by returning the ratio of positive embeddings
     closer to the anchor than negative ones. The positive embedding must be at least `alpha` closer
-    to the anchor than the negative embedding"""
+    to the anchor than the negative embedding
+
+    anchor, positive, and negative are all tensors of shape (B, E)
+    """
     pos_dists = torch.linalg.vector_norm(anchor - positive, ord=2, dim=1)
     neg_dists = torch.linalg.vector_norm(anchor - negative, ord=2, dim=1)
 
-    correct = pos_dists < (neg_dists + alpha)  # a boolean mask
+    correct = (pos_dists + alpha) < neg_dists  # a boolean mask
     if debug:
         return correct
     else:
