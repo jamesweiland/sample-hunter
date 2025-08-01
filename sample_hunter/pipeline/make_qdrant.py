@@ -89,7 +89,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument("model", type=Path, help="the path to the embeddings model")
-    parser.add_argument("index", type=Path, help="Where to save the index")
     parser.add_argument(
         "--repo-id",
         type=str,
