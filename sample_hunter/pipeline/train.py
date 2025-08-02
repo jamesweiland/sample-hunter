@@ -198,9 +198,8 @@ def train(
 
 
 def train_map_fn(ex):
-    with Preprocessor(
-        train_map_fn.preprocess_config, obfuscator=Obfuscator(train_map_fn.obfuscator_config)  # type: ignore
-    ) as preprocessor:
+    print(f"worker size: {sys.getsizeof(train_map_fn) * 1e-9} GB")
+    with train_map_fn.preprocessor as preprocessor:  # type: ignore
         try:
             if isinstance(ex["json"], bytes):
                 ex["json"] = json.loads(ex["json"].decode("utf-8"))
@@ -251,9 +250,10 @@ def _init_dataloader_worker(
     obfuscator_config: ObfuscatorConfig,
     queue: mp.Queue,
 ):
-    function.preprocess_config = preprocess_config
-    function.obfuscator_config = obfuscator_config
     function.queue = queue
+    function.preprocessor = Preprocessor(
+        preprocess_config, obfuscator=Obfuscator(obfuscator_config)
+    )
 
 
 def dataloader_worker_init_fn(_, function, preprocess_config, obfuscator_config, queue):
