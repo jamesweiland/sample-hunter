@@ -200,7 +200,6 @@ def parse_args() -> argparse.Namespace:
         "--num-workers",
         type=int,
         help="The number of processes to use for dataloading",
-        default=1,
     )
 
     parser.add_argument(
@@ -260,32 +259,36 @@ if __name__ == "__main__":
         obfuscator_config = ObfuscatorConfig()
         encoder_net_config = EncoderNetConfig()
 
-    with Preprocessor(
-        preprocess_config, obfuscator=Obfuscator(obfuscator_config)
-    ) as preprocessor:
         batch_num = 1
-
         with tqdm(
             desc=f"Preprocessing batch {batch_num}",
             total=train_config.source_batch_size,
         ) as pbar:
 
             def map_fn(ex):
-                try:
-                    if isinstance(ex["json"], bytes):
-                        ex["json"] = json.loads(ex["json"].decode("utf-8"))
-                    positive, anchor = preprocessor(ex["mp3"], train=True)
-                    pbar.update()
-                    return {**ex, "positive": positive, "anchor": anchor}
-                except Exception as e:
-                    print(f"An error occurred trying to process {ex["json"]["title"]}")
-                    print(str(e))
+                with Preprocessor(
+                    preprocess_config, obfuscator=Obfuscator(obfuscator_config)
+                ) as preprocessor:
+                    try:
+                        if isinstance(ex["json"], bytes):
+                            ex["json"] = json.loads(ex["json"].decode("utf-8"))
+                        positive, anchor = preprocessor(ex["mp3"], train=True)
+                        pbar.update()
+                        return {**ex, "positive": positive, "anchor": anchor}
+                    except Exception as e:
+                        print(
+                            f"An error occurred trying to process {ex["json"]["title"]}"
+                        )
+                        print(str(e))
 
-                    traceback.print_exc()
-                    return ex
+                        traceback.print_exc()
+                        return ex
 
             def collate_fn(songs):
                 pbar.reset()
+                global batch_num
+                batch_num += 1
+
                 # filter out songs where preprocessing failed
                 songs = [
                     song for song in songs if "anchor" in song and "positive" in song
@@ -353,6 +356,7 @@ if __name__ == "__main__":
                 train_dataset,
                 batch_size=train_config.source_batch_size,
                 collate_fn=collate_fn,
+                num_workers=args.num_workers,
             )
 
             test_dataloader = DataLoader(
