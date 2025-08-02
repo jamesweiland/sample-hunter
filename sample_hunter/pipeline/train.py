@@ -198,7 +198,6 @@ def train(
 
 
 def train_map_fn(ex):
-    print(f"worker size: {sys.getsizeof(train_map_fn) * 1e-9} GB")
     with train_map_fn.preprocessor as preprocessor:  # type: ignore
         try:
             if isinstance(ex["json"], bytes):
@@ -217,7 +216,7 @@ def train_map_fn(ex):
 batch_num = 1
 
 
-def train_collate_fn(songs, preprocess_progress_queue: mp.Queue):
+def train_collate_fn(songs, preprocess_progress_queue: mp.Queue, sub_batch_size: int):
     global batch_num
     batch_num += 1
     preprocess_progress_queue.put("RESET")
@@ -237,9 +236,7 @@ def train_collate_fn(songs, preprocess_progress_queue: mp.Queue):
 
     anchors = torch.cat([song["anchor"] for song in songs], dim=0)
     positives = torch.cat([song["positive"] for song in songs], dim=0)
-    sub_batches = collate_spectrograms(
-        (anchors, positives, keys), train_config.sub_batch_size
-    )
+    sub_batches = collate_spectrograms((anchors, positives, keys), sub_batch_size)
 
     return [(anchor, positive, k) for anchor, positive, k in sub_batches]
 
@@ -266,11 +263,13 @@ def dataloader_worker_init_fn(_, function, preprocess_config, obfuscator_config,
 
 
 def preprocess_progress_listener(queue: mp.Queue, total: int, desc: str):
+    print("in listener")
     with tqdm(total=total, desc=desc) as pbar:
         count = 0
         while count < total:
             try:
                 msg = queue.get(timeout=120.0)
+                print(f"msg: {msg}")
                 if msg == "DONE":
                     return
                 elif msg == "RESET":
@@ -358,156 +357,152 @@ if __name__ == "__main__":
         obfuscator_config = ObfuscatorConfig()
         encoder_net_config = EncoderNetConfig()
 
-    batch_num = 1
-    with tqdm(
-        desc=f"Preprocessing batch {batch_num}",
-        total=train_config.source_batch_size,
-    ) as pbar:
+    # load the datasets, try to get them local first and if not, load from hf
+    if Path(args.dataset).exists():
+        # load locally
+        dataset_dir = Path(args.dataset)
 
-        # load the datasets, try to get them local first and if not, load from hf
-        if Path(args.dataset).exists():
-            # load locally
-            dataset_dir = Path(args.dataset)
+        train_tars = (dataset_dir / "train").glob("*.tar")
+        test_tars = (dataset_dir / "test").glob("*.tar")
 
-            train_tars = (dataset_dir / "train").glob("*.tar")
-            test_tars = (dataset_dir / "test").glob("*.tar")
+        # have to convert the paths to str
+        train_tars = [str(tar) for tar in train_tars]
+        test_tars = [str(tar) for tar in test_tars]
 
-            # have to convert the paths to str
-            train_tars = [str(tar) for tar in train_tars]
-            test_tars = [str(tar) for tar in test_tars]
+        train_dataset = wds.WebDataset(train_tars)
+        test_dataset = wds.WebDataset(test_tars)
 
-            train_dataset = wds.WebDataset(train_tars)
-            test_dataset = wds.WebDataset(test_tars)
+    else:
+        # load from hf
+        train_dataset = cast(
+            wds.WebDataset,
+            load_webdataset(
+                args.dataset,
+                "train",
+                token=args.token,
+                cache_dir=train_config.cache_dir,
+            ),
+        )
+        test_dataset = cast(
+            wds.WebDataset,
+            load_webdataset(
+                args.dataset,
+                "test",
+                token=args.token,
+                cache_dir=train_config.cache_dir,
+            ),
+        )
 
-        else:
-            # load from hf
-            train_dataset = cast(
-                wds.WebDataset,
-                load_webdataset(
-                    args.dataset,
-                    "train",
-                    token=args.token,
-                    cache_dir=train_config.cache_dir,
-                ),
+    train_dataset = train_dataset.map(train_map_fn)
+    test_dataset = test_dataset.map(train_map_fn)
+
+    if args.num_workers and args.num_workers > 0:
+
+        ctx = mp.get_context("spawn")
+
+    else:
+        ctx = None
+
+    preprocess_progress_queue = mp.Queue()
+    preprocess_pbar = threading.Thread(
+        target=preprocess_progress_listener,
+        args=[
+            preprocess_progress_queue,
+            train_config.source_batch_size,
+            "Preprocessing batch...",
+        ],
+        daemon=True,
+    )
+
+    cf = functools.partial(
+        train_collate_fn,
+        preprocess_progress_queue=preprocess_progress_queue,
+        sub_batch_size=train_config.sub_batch_size,
+    )
+    init_worker = functools.partial(
+        dataloader_worker_init_fn,
+        function=train_map_fn,
+        preprocess_config=preprocess_config,
+        obfuscator_config=obfuscator_config,
+        queue=preprocess_progress_queue,
+    )
+
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=train_config.source_batch_size,
+        collate_fn=cf,
+        num_workers=args.num_workers,
+        multiprocessing_context=ctx,
+        worker_init_fn=init_worker,
+    )
+
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=train_config.source_batch_size,
+        collate_fn=cf,
+        num_workers=args.num_workers,
+        multiprocessing_context=ctx,
+        worker_init_fn=init_worker,
+    )
+
+    if args.num:
+        train_dataset = train_dataset.slice(args.num)
+
+    if args.continue_:
+        if not args.from_:
+            raise ValueError("--continue was given with no model to load in")
+        if not args.from_.exists():
+            raise ValueError(f"--from not found: {args.from_}")
+        if not str(args.from_.stem).split("-")[-1].isdigit():
+            raise ValueError(
+                f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
+                "The stem must follow the format: <stem_name>-<epoch>"
             )
-            test_dataset = cast(
-                wds.WebDataset,
-                load_webdataset(
-                    args.dataset,
-                    "test",
-                    token=args.token,
-                    cache_dir=train_config.cache_dir,
-                ),
+
+        epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
+        if epochs_already_trained >= train_config.num_epochs:
+            raise ValueError(
+                "The model has already been trained for more epochs than specified in the config for num_epochs\n"
+                f"Epochs already trained: {epochs_already_trained}\n"
+                f"Config num_epochs: {train_config.num_epochs}"
             )
 
-        train_dataset = train_dataset.map(train_map_fn)
-        test_dataset = test_dataset.map(train_map_fn)
+        model = load_model(args.from_, encoder_net_config)
+        num_epochs = range(epochs_already_trained + 1, train_config.num_epochs + 1)
+    elif args.from_:
+        if not args.from_.exists():
+            raise ValueError(f"--from not found: {args.from_}")
 
-        if args.num_workers and args.num_workers > 0:
+        model = load_model(args.from_, encoder_net_config)
+        num_epochs = range(1, train_config.num_epochs + 1)
+    else:
+        # make a new model
+        model = EncoderNet(encoder_net_config).to(DEVICE)  # type: ignore
+        num_epochs = range(1, train_config.num_epochs + 1)
 
-            ctx = mp.get_context("spawn")
+    save_per_epoch = args.out if args.save_per_epoch else None
 
-        else:
-            ctx = None
+    adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
+    triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
 
-        preprocess_progress_queue = mp.Queue()
-        preprocess_pbar = threading.Thread(
-            target=preprocess_progress_listener,
-            args=[
-                preprocess_progress_queue,
-                train_config.source_batch_size,
-                "Preprocessing batch...",
-            ],
-            daemon=True,
-        )
+    preprocess_pbar.start()
+    train(
+        model=model,
+        train_dataloader=train_dataloader,
+        test_dataloader=test_dataloader,
+        optimizer=adam,
+        loss_fn=triplet_loss,
+        mine_strategy=train_config.mine_strategy,
+        log_dir=train_config.tensorboard_log_dir,
+        tensorboard=train_config.tensorboard,
+        device=DEVICE,
+        num_epochs=num_epochs,
+        triplet_loss_margin=train_config.triplet_loss_margin,
+        save_per_epoch=save_per_epoch,
+    )
 
-        cf = functools.partial(
-            train_collate_fn, preprocess_progress_queue=preprocess_progress_queue
-        )
-        init_worker = functools.partial(
-            dataloader_worker_init_fn,
-            function=train_map_fn,
-            preprocess_config=preprocess_config,
-            obfuscator_config=obfuscator_config,
-            queue=preprocess_progress_queue,
-        )
+    preprocess_progress_queue.put("DONE")
+    preprocess_pbar.join()
 
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_size=train_config.source_batch_size,
-            collate_fn=cf,
-            num_workers=args.num_workers,
-            multiprocessing_context=ctx,
-            worker_init_fn=init_worker,
-        )
-
-        test_dataloader = DataLoader(
-            test_dataset,
-            batch_size=train_config.source_batch_size,
-            collate_fn=cf,
-            num_workers=args.num_workers,
-            multiprocessing_context=ctx,
-            worker_init_fn=init_worker,
-        )
-
-        if args.num:
-            train_dataset = train_dataset.slice(args.num)
-
-        if args.continue_:
-            if not args.from_:
-                raise ValueError("--continue was given with no model to load in")
-            if not args.from_.exists():
-                raise ValueError(f"--from not found: {args.from_}")
-            if not str(args.from_.stem).split("-")[-1].isdigit():
-                raise ValueError(
-                    f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
-                    "The stem must follow the format: <stem_name>-<epoch>"
-                )
-
-            epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
-            if epochs_already_trained >= train_config.num_epochs:
-                raise ValueError(
-                    "The model has already been trained for more epochs than specified in the config for num_epochs\n"
-                    f"Epochs already trained: {epochs_already_trained}\n"
-                    f"Config num_epochs: {train_config.num_epochs}"
-                )
-
-            model = load_model(args.from_, encoder_net_config)
-            num_epochs = range(epochs_already_trained + 1, train_config.num_epochs + 1)
-        elif args.from_:
-            if not args.from_.exists():
-                raise ValueError(f"--from not found: {args.from_}")
-
-            model = load_model(args.from_, encoder_net_config)
-            num_epochs = range(1, train_config.num_epochs + 1)
-        else:
-            # make a new model
-            model = EncoderNet(encoder_net_config).to(DEVICE)  # type: ignore
-            num_epochs = range(1, train_config.num_epochs + 1)
-
-        save_per_epoch = args.out if args.save_per_epoch else None
-
-        adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
-        triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
-
-        preprocess_pbar.start()
-        train(
-            model=model,
-            train_dataloader=train_dataloader,
-            test_dataloader=test_dataloader,
-            optimizer=adam,
-            loss_fn=triplet_loss,
-            mine_strategy=train_config.mine_strategy,
-            log_dir=train_config.tensorboard_log_dir,
-            tensorboard=train_config.tensorboard,
-            device=DEVICE,
-            num_epochs=num_epochs,
-            triplet_loss_margin=train_config.triplet_loss_margin,
-            save_per_epoch=save_per_epoch,
-        )
-
-        preprocess_progress_queue.put("DONE")
-        preprocess_pbar.join()
-
-        torch.save(model.state_dict(), args.out)
-        print(f"Model saved to {args.out}")
+    torch.save(model.state_dict(), args.out)
+    print(f"Model saved to {args.out}")
