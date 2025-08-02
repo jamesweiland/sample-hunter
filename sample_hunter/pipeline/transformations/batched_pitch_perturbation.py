@@ -67,7 +67,6 @@ class BatchedPitchPerturbation:
                 ],
             )
         else:
-            mp.set_start_method("spawn")
             self.shifters = [
                 torchaudio.transforms.PitchShift(
                     sample_rate=self.sample_rate,
