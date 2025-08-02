@@ -85,7 +85,6 @@ class BatchedTimeStretchPerturbation:
                 ],
             )
         else:
-            mp.set_start_method("spawn")
             self.stretchers = [
                 torchaudio.transforms.TimeStretch(
                     hop_length=self.hop_length,
