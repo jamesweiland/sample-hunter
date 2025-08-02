@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from typing import Dict, List, Tuple, Generator
 from huggingface_hub import HfApi
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 import torchaudio
 import webdataset as wds
 import re
@@ -37,7 +37,6 @@ def flatten_sub_batches(
     """
     with tqdm(desc="Iterating through sub-batches...") as pbar:
         dataloader_iter = iter(dataloader)
-        pbar.update()
         while True:
             try:
                 batch = next(dataloader_iter)
@@ -49,6 +48,7 @@ def flatten_sub_batches(
                 continue
 
             for sub_batch in batch:
+                pbar.update()
                 yield sub_batch
 
 

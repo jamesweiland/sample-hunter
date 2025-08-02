@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import Callable, Tuple, cast
 import argparse
 from pathlib import Path
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 import webdataset as wds
 
 from .data_loading import load_webdataset
