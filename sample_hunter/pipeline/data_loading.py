@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 from typing import Dict, List, Tuple, Generator
 from huggingface_hub import HfApi
+from tqdm import tqdm
 import torchaudio
 import webdataset as wds
 import re
@@ -34,19 +35,21 @@ def flatten_sub_batches(
     returns a list of tensors. This yields the tensors in the list, one at a time.
     This expects the dataloader to yield a list of tuples
     """
-    dataloader_iter = iter(dataloader)
-    while True:
-        try:
-            batch = next(dataloader_iter)
-        except StopIteration:
-            break  # End of dataloader
-        except Exception as e:
-            print("An error occurred while fetching a batch from the dataloader")
-            traceback.print_exc()
-            continue
+    with tqdm(desc="Iterating through sub-batches...") as pbar:
+        dataloader_iter = iter(dataloader)
+        pbar.update()
+        while True:
+            try:
+                batch = next(dataloader_iter)
+            except StopIteration:
+                break  # End of dataloader
+            except Exception as e:
+                print("An error occurred while fetching a batch from the dataloader")
+                traceback.print_exc()
+                continue
 
-        for sub_batch in batch:
-            yield sub_batch
+            for sub_batch in batch:
+                yield sub_batch
 
 
 def collate_spectrograms(

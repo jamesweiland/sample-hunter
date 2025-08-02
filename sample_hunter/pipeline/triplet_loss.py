@@ -12,16 +12,20 @@ def triplet_accuracy(
     anchor: torch.Tensor,
     positive: torch.Tensor,
     negative: torch.Tensor,
-    alpha: float,
+    margin: float,
     debug: bool = False,
 ) -> float | torch.Tensor:
-    """Calculates the accuracy of the model by returning the ratio of positive embeddings
+    """
+    Calculates the accuracy of the model by returning the ratio of positive embeddings
     closer to the anchor than negative ones. The positive embedding must be at least `alpha` closer
-    to the anchor than the negative embedding"""
+    to the anchor than the negative embedding
+
+    anchor, positive, and negative are all tensors of shape (B, E)
+    """
     pos_dists = torch.linalg.vector_norm(anchor - positive, ord=2, dim=1)
     neg_dists = torch.linalg.vector_norm(anchor - negative, ord=2, dim=1)
 
-    correct = pos_dists < (neg_dists + alpha)  # a boolean mask
+    correct = (pos_dists + margin) < neg_dists  # a boolean mask
     if debug:
         return correct
     else:
@@ -33,14 +37,14 @@ def mine_negative(
     positive_embeddings: torch.Tensor,
     anchor_embeddings: torch.Tensor,
     mine_strategy: str = DEFAULT_MINE_STRATEGY,
-    alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN,
+    margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
 ):
     if mine_strategy == "semi":
         negative_embeddings = mine_semi_hard_negative(
             anchor_embeddings=anchor_embeddings,
             positive_embeddings=positive_embeddings,
             song_ids=song_ids,
-            alpha=alpha,
+            alpha=margin,
         )
     else:
         negative_embeddings = mine_hardest_negative(

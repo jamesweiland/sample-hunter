@@ -17,11 +17,11 @@ DEFAULT_STEP_NUM_SEC: float = 0.5
 DEFAULT_SAMPLE_RATE: int = 44_100
 DEFAULT_EMBEDDING_DIM: int = 128
 DEFAULT_TRIPLET_LOSS_MARGIN: float = 0.2
-DEFAULT_MINE_STRATEGY: str = "semi"
+DEFAULT_MINE_STRATEGY: Literal["semi", "hard"] = "hard"
 DEFAULT_TOP_K: int = 20
 DEFAULT_VOLUME_THRESHOLD: int = -60  # dbfs, remove anything below this
 
-DEFAULT_REPO_ID: str = "samplr/songs"
+DEFAULT_DATASET_REPO: str = "samplr/songs"
 DEFAULT_CACHE_DIR: Path = Path("/home/james/code/sample-hunter/_data/cache")
 
 T = TypeVar("T", bound="YAMLConfig")
@@ -146,7 +146,7 @@ class TrainConfig(YAMLConfig):
     sub_batch_size: int = 2_000
     learning_rate: float = 0.00005
     num_epochs: int = 10
-    alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN
+    triplet_loss_margin: float = DEFAULT_TRIPLET_LOSS_MARGIN
     tensorboard_log_dir: Path = Path("/home/james/code/sample-hunter/_data/logs")
     tensorboard: str = "epoch"  # can be "none", "batch", or "epoch"
     cache_dir: Path = Path(DEFAULT_CACHE_DIR)
