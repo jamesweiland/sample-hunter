@@ -48,9 +48,7 @@ def train_single_epoch(
     epoch_total_loss = 0
     num_batches = 0
     epoch_total_accuracy = 0
-    for anchor, positive, keys in tqdm(
-        flatten_sub_batches(dataloader), desc="Training epoch..."
-    ):
+    for anchor, positive, keys in flatten_sub_batches(dataloader):
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
@@ -263,33 +261,43 @@ if __name__ == "__main__":
     with Preprocessor(
         preprocess_config, obfuscator=Obfuscator(obfuscator_config)
     ) as preprocessor:
+        batch_num = 1
 
-        def map_fn(ex):
-            try:
-                positive, anchor = preprocessor(ex["mp3"], train=True)
-                return {**ex, "positive": positive, "anchor": anchor}
-            except Exception as e:
-                print(f"An error occurred trying to process {ex["json"]["title"]}")
-                print(str(e))
+        with tqdm(
+            desc=f"Preprocessing batch {batch_num}",
+            total=train_config.source_batch_size,
+        ) as pbar:
 
-                traceback.print_exc()
-                return ex
+            def map_fn(ex):
+                try:
+                    positive, anchor = preprocessor(ex["mp3"], train=True)
+                    pbar.update()
+                    return {**ex, "positive": positive, "anchor": anchor}
+                except Exception as e:
+                    print(f"An error occurred trying to process {ex["json"]["title"]}")
+                    print(str(e))
 
-        def collate_fn(songs):
-            # filter out songs where preprocessing failed
-            songs = [song for song in songs if "anchor" in song and "positive" in song]
+                    traceback.print_exc()
+                    return ex
 
-            keys = torch.tensor([int(song["__key__"]) for song in songs])
-            windows_per_song = [song["anchor"].shape[0] for song in songs]
-            keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
+            def collate_fn(songs):
+                pbar.reset()
+                # filter out songs where preprocessing failed
+                songs = [
+                    song for song in songs if "anchor" in song and "positive" in song
+                ]
 
-            anchors = torch.cat([song["anchor"] for song in songs], dim=0)
-            positives = torch.cat([song["positive"] for song in songs], dim=0)
-            sub_batches = collate_spectrograms(
-                (anchors, positives, keys), train_config.sub_batch_size
-            )
+                keys = torch.tensor([int(song["__key__"]) for song in songs])
+                windows_per_song = [song["anchor"].shape[0] for song in songs]
+                keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
 
-            return [(anchor, positive, k) for anchor, positive, k in sub_batches]
+                anchors = torch.cat([song["anchor"] for song in songs], dim=0)
+                positives = torch.cat([song["positive"] for song in songs], dim=0)
+                sub_batches = collate_spectrograms(
+                    (anchors, positives, keys), train_config.sub_batch_size
+                )
+
+                return [(anchor, positive, k) for anchor, positive, k in sub_batches]
 
         # load the datasets, try to get them local first and if not, load from hf
         if Path(args.dataset).exists():
@@ -298,6 +306,11 @@ if __name__ == "__main__":
 
             train_tars = (dataset_dir / "train").glob("*.tar")
             test_tars = (dataset_dir / "test").glob("*.tar")
+
+            # have to convert the paths to str
+            train_tars = [str(tar) for tar in train_tars]
+            test_tars = [str(tar) for tar in test_tars]
+
             train_dataset = wds.WebDataset(train_tars)
             test_dataset = wds.WebDataset(test_tars)
 
