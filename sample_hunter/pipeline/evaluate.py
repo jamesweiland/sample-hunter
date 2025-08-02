@@ -72,14 +72,14 @@ def evaluate_batch(
             positive_embeddings,
             anchor_embeddings,
             mine_strategy=mine_strategy,
-            alpha=alpha,
+            margin=alpha,
         )
 
         res = triplet_accuracy(
             anchor=anchor_embeddings,
             positive=positive_embeddings,
             negative=negative_embeddings,
-            alpha=alpha,
+            margin=alpha,
             debug=debug,
         )
         if debug:

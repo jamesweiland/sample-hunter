@@ -22,7 +22,7 @@ from sample_hunter.config import (
     TrainConfig,
     ObfuscatorConfig,
     EncoderNetConfig,
-    DEFAULT_REPO_ID,
+    DEFAULT_DATASET_REPO,
 )
 from sample_hunter._util import (
     DEVICE,
@@ -38,7 +38,7 @@ def train_single_epoch(
     mine_strategy: str,
     optimizer: torch.optim.Optimizer,
     device: str,
-    alpha: float,
+    triplet_loss_margin: float,
     writer: SummaryWriter | None = None,
 ) -> Tuple[float, float]:
     """
@@ -65,7 +65,7 @@ def train_single_epoch(
             positive_embeddings=positive_embeddings,
             song_ids=keys,
             mine_strategy=mine_strategy,
-            alpha=alpha,
+            margin=triplet_loss_margin,
         )
         # calculate loss
         loss = loss_fn(anchor_embeddings, positive_embeddings, negative_embeddings)
@@ -79,7 +79,7 @@ def train_single_epoch(
             anchor=anchor_embeddings,
             positive=positive_embeddings,
             negative=negative_embeddings,
-            alpha=alpha,
+            margin=triplet_loss_margin,
         )
 
         if writer:
@@ -87,12 +87,7 @@ def train_single_epoch(
             writer.add_scalar("Training accuracy", accuracy, num_batches)
 
         epoch_total_loss += loss.item()
-        epoch_total_accuracy += triplet_accuracy(
-            anchor=anchor_embeddings,
-            positive=positive_embeddings,
-            negative=negative_embeddings,
-            alpha=alpha,
-        )
+        epoch_total_accuracy += accuracy
         num_batches += 1
 
     epoch_average_loss = epoch_total_loss / num_batches
@@ -109,7 +104,7 @@ def train(
     mine_strategy: str,
     optimizer: torch.optim.Optimizer,
     num_epochs: range,
-    alpha: float,
+    triplet_loss_margin: float,
     tensorboard: str = "none",
     log_dir: Path | None = None,
     test_dataloader: DataLoader | None = None,
@@ -167,7 +162,7 @@ def train(
             mine_strategy=mine_strategy,
             optimizer=optimizer,
             device=device,
-            alpha=alpha,
+            triplet_loss_margin=triplet_loss_margin,
             writer=writer if tensorboard == "batch" else None,
         )
         if tensorboard == "epoch":
@@ -184,7 +179,10 @@ def train(
         if test_dataloader is not None:
             # evaluate accuracy as we go on the test set
             accuracy = evaluate(
-                model=model, dataloader=test_dataloader, alpha=alpha, device=device
+                model=model,
+                dataloader=test_dataloader,
+                alpha=triplet_loss_margin,
+                device=device,
             )
             if tensorboard != "none":
                 writer.add_scalar("Testing accuracy", accuracy, i)  # type: ignore
@@ -223,10 +221,10 @@ def parse_args() -> argparse.Namespace:
         "--token", type=str, help="Your huggingface token", default=HF_TOKEN
     )
     hf.add_argument(
-        "--repo-id",
+        "--dataset",
         type=str,
-        default=DEFAULT_REPO_ID,
-        help="The huggingface repository to use as a training dataset",
+        default=DEFAULT_DATASET_REPO,
+        help="The dataset to use for training and testing. Either a HF repo id or a local path",
     )
 
     dev = parser.add_argument_group("dev")
@@ -293,21 +291,39 @@ if __name__ == "__main__":
 
             return [(anchor, positive, k) for anchor, positive, k in sub_batches]
 
-        train_dataset = cast(
-            wds.WebDataset,
-            load_webdataset(
-                args.repo_id,
-                "train",
-                token=args.token,
-                cache_dir=train_config.cache_dir,
-            ),
-        ).map(map_fn)
-        test_dataset = cast(
-            wds.WebDataset,
-            load_webdataset(
-                args.repo_id, "test", token=args.token, cache_dir=train_config.cache_dir
-            ),
-        ).map(map_fn)
+        # load the datasets, try to get them local first and if not, load from hf
+        if Path(args.dataset).exists():
+            # load locally
+            dataset_dir = Path(args.dataset)
+
+            train_tars = (dataset_dir / "train").glob("*.tar")
+            test_tars = (dataset_dir / "test").glob("*.tar")
+            train_dataset = wds.WebDataset(train_tars)
+            test_dataset = wds.WebDataset(test_tars)
+
+        else:
+            # load from hf
+            train_dataset = cast(
+                wds.WebDataset,
+                load_webdataset(
+                    args.dataset,
+                    "train",
+                    token=args.token,
+                    cache_dir=train_config.cache_dir,
+                ),
+            )
+            test_dataset = cast(
+                wds.WebDataset,
+                load_webdataset(
+                    args.dataset,
+                    "test",
+                    token=args.token,
+                    cache_dir=train_config.cache_dir,
+                ),
+            )
+
+        train_dataset = train_dataset.map(map_fn)
+        test_dataset = test_dataset.map(map_fn)
 
         train_dataloader = DataLoader(
             train_dataset,
@@ -359,7 +375,7 @@ if __name__ == "__main__":
         save_per_epoch = args.out if args.save_per_epoch else None
 
         adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
-        triplet_loss = nn.TripletMarginLoss()
+        triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
 
         train(
             model=model,
@@ -372,7 +388,7 @@ if __name__ == "__main__":
             tensorboard=train_config.tensorboard,
             device=DEVICE,
             num_epochs=num_epochs,
-            alpha=train_config.alpha,
+            triplet_loss_margin=train_config.triplet_loss_margin,
             save_per_epoch=save_per_epoch,
         )
 
