@@ -6,11 +6,14 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
+import torch.multiprocessing as mp
 from typing import Callable, Tuple, cast
 import argparse
 from pathlib import Path
 from tqdm.notebook import tqdm
 import webdataset as wds
+import threading
+import functools
 
 from .data_loading import load_webdataset
 from .encoder_net import EncoderNet
@@ -195,13 +198,13 @@ def train(
 
 def train_map_fn(ex):
     with Preprocessor(
-        preprocess_config, obfuscator=Obfuscator(obfuscator_config)
+        train_map_fn.preprocess_config, obfuscator=Obfuscator(train_map_fn.obfuscator_config)  # type: ignore
     ) as preprocessor:
         try:
             if isinstance(ex["json"], bytes):
                 ex["json"] = json.loads(ex["json"].decode("utf-8"))
             positive, anchor = preprocessor(ex["mp3"], train=True)
-            pbar.update()
+            train_map_fn.queue.put(1)  # type: ignore
             return {**ex, "positive": positive, "anchor": anchor}
         except Exception as e:
             print(f"An error occurred trying to process {ex["json"]["title"]}")
@@ -211,10 +214,14 @@ def train_map_fn(ex):
             return ex
 
 
-def train_collate_fn(songs):
-    pbar.reset()
+batch_num = 1
+
+
+def train_collate_fn(songs, preprocess_progress_queue: mp.Queue):
     global batch_num
     batch_num += 1
+    preprocess_progress_queue.put("RESET")
+    preprocess_progress_queue.put(f"Preprocessing batch {batch_num}...")
 
     # filter out songs where preprocessing failed
     songs = [song for song in songs if "anchor" in song and "positive" in song]
@@ -235,6 +242,47 @@ def train_collate_fn(songs):
     )
 
     return [(anchor, positive, k) for anchor, positive, k in sub_batches]
+
+
+def _init_dataloader_worker(
+    function,
+    preprocess_config: PreprocessConfig,
+    obfuscator_config: ObfuscatorConfig,
+    queue: mp.Queue,
+):
+    function.preprocess_config = preprocess_config
+    function.obfuscator_config = obfuscator_config
+    function.queue = queue
+
+
+def dataloader_worker_init_fn(_, function, preprocess_config, obfuscator_config, queue):
+    _init_dataloader_worker(
+        function=function,
+        preprocess_config=preprocess_config,
+        obfuscator_config=obfuscator_config,
+        queue=queue,
+    )
+
+
+def preprocess_progress_listener(queue: mp.Queue, total: int, desc: str):
+    with tqdm(total=total, desc=desc) as pbar:
+        count = 0
+        while count < total:
+            try:
+                msg = queue.get()
+                if msg == "DONE":
+                    return
+                elif msg == "RESET":
+                    new_desc = queue.get()
+                    pbar.reset()
+                    pbar.set_description(new_desc)
+                    count = 0
+                else:
+                    pbar.update(msg)
+                    count += msg
+
+            except Exception as e:
+                break
 
 
 def parse_args() -> argparse.Namespace:
@@ -349,26 +397,50 @@ if __name__ == "__main__":
         test_dataset = test_dataset.map(train_map_fn)
 
         if args.num_workers and args.num_workers > 0:
-            import torch.multiprocessing as mp
 
             ctx = mp.get_context("spawn")
+
         else:
             ctx = None
+
+        preprocess_progress_queue = mp.Queue()
+        preprocess_pbar = threading.Thread(
+            target=preprocess_progress_listener,
+            args=[
+                preprocess_progress_queue,
+                train_config.source_batch_size,
+                "Preprocessing batch...",
+            ],
+            daemon=True,
+        )
+
+        cf = functools.partial(
+            train_collate_fn, preprocess_progress_queue=preprocess_progress_queue
+        )
+        init_worker = functools.partial(
+            dataloader_worker_init_fn,
+            function=train_map_fn,
+            preprocess_config=preprocess_config,
+            obfuscator_config=obfuscator_config,
+            queue=preprocess_progress_queue,
+        )
 
         train_dataloader = DataLoader(
             train_dataset,
             batch_size=train_config.source_batch_size,
-            collate_fn=train_collate_fn,
+            collate_fn=cf,
             num_workers=args.num_workers,
             multiprocessing_context=ctx,
+            worker_init_fn=init_worker,
         )
 
         test_dataloader = DataLoader(
             test_dataset,
             batch_size=train_config.source_batch_size,
-            collate_fn=train_collate_fn,
+            collate_fn=cf,
             num_workers=args.num_workers,
             multiprocessing_context=ctx,
+            worker_init_fn=init_worker,
         )
 
         if args.num:
@@ -411,6 +483,7 @@ if __name__ == "__main__":
         adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
         triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
 
+        preprocess_pbar.start()
         train(
             model=model,
             train_dataloader=train_dataloader,
@@ -425,6 +498,9 @@ if __name__ == "__main__":
             triplet_loss_margin=train_config.triplet_loss_margin,
             save_per_epoch=save_per_epoch,
         )
+
+        preprocess_progress_queue.put("DONE")
+        preprocess_pbar.join()
 
         torch.save(model.state_dict(), args.out)
         print(f"Model saved to {args.out}")
