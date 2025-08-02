@@ -268,7 +268,6 @@ def preprocess_progress_listener(queue: mp.Queue, total: int, desc: str):
         while count < total:
             try:
                 msg = queue.get(timeout=120.0)
-                print(f"msg: {msg}")
                 if msg == "DONE":
                     return
                 elif msg == "RESET":
