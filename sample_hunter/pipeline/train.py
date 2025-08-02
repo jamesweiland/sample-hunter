@@ -193,6 +193,50 @@ def train(
     print("Finished training")
 
 
+def train_map_fn(ex):
+    with Preprocessor(
+        preprocess_config, obfuscator=Obfuscator(obfuscator_config)
+    ) as preprocessor:
+        try:
+            if isinstance(ex["json"], bytes):
+                ex["json"] = json.loads(ex["json"].decode("utf-8"))
+            positive, anchor = preprocessor(ex["mp3"], train=True)
+            pbar.update()
+            return {**ex, "positive": positive, "anchor": anchor}
+        except Exception as e:
+            print(f"An error occurred trying to process {ex["json"]["title"]}")
+            print(str(e))
+
+            traceback.print_exc()
+            return ex
+
+
+def train_collate_fn(songs):
+    pbar.reset()
+    global batch_num
+    batch_num += 1
+
+    # filter out songs where preprocessing failed
+    songs = [song for song in songs if "anchor" in song and "positive" in song]
+
+    keys = [song["json"]["id"] for song in songs]
+    keys = [uuid.UUID(key).int for key in keys]
+    # one-hot encode keys as int64
+    uuid_to_key = {u: i for i, u in enumerate(keys)}
+    keys = torch.tensor([uuid_to_key[u] for u in keys])
+
+    windows_per_song = torch.tensor([song["anchor"].shape[0] for song in songs])
+    keys = torch.repeat_interleave(keys, windows_per_song)
+
+    anchors = torch.cat([song["anchor"] for song in songs], dim=0)
+    positives = torch.cat([song["positive"] for song in songs], dim=0)
+    sub_batches = collate_spectrograms(
+        (anchors, positives, keys), train_config.sub_batch_size
+    )
+
+    return [(anchor, positive, k) for anchor, positive, k in sub_batches]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
@@ -265,48 +309,6 @@ if __name__ == "__main__":
         total=train_config.source_batch_size,
     ) as pbar:
 
-        def map_fn(ex):
-            with Preprocessor(
-                preprocess_config, obfuscator=Obfuscator(obfuscator_config)
-            ) as preprocessor:
-                try:
-                    if isinstance(ex["json"], bytes):
-                        ex["json"] = json.loads(ex["json"].decode("utf-8"))
-                    positive, anchor = preprocessor(ex["mp3"], train=True)
-                    pbar.update()
-                    return {**ex, "positive": positive, "anchor": anchor}
-                except Exception as e:
-                    print(f"An error occurred trying to process {ex["json"]["title"]}")
-                    print(str(e))
-
-                    traceback.print_exc()
-                    return ex
-
-        def collate_fn(songs):
-            pbar.reset()
-            global batch_num
-            batch_num += 1
-
-            # filter out songs where preprocessing failed
-            songs = [song for song in songs if "anchor" in song and "positive" in song]
-
-            keys = [song["json"]["id"] for song in songs]
-            keys = [uuid.UUID(key).int for key in keys]
-            # one-hot encode keys as int64
-            uuid_to_key = {u: i for i, u in enumerate(keys)}
-            keys = torch.tensor([uuid_to_key[u] for u in keys])
-
-            windows_per_song = torch.tensor([song["anchor"].shape[0] for song in songs])
-            keys = torch.repeat_interleave(keys, windows_per_song)
-
-            anchors = torch.cat([song["anchor"] for song in songs], dim=0)
-            positives = torch.cat([song["positive"] for song in songs], dim=0)
-            sub_batches = collate_spectrograms(
-                (anchors, positives, keys), train_config.sub_batch_size
-            )
-
-            return [(anchor, positive, k) for anchor, positive, k in sub_batches]
-
         # load the datasets, try to get them local first and if not, load from hf
         if Path(args.dataset).exists():
             # load locally
@@ -343,8 +345,8 @@ if __name__ == "__main__":
                 ),
             )
 
-        train_dataset = train_dataset.map(map_fn)
-        test_dataset = test_dataset.map(map_fn)
+        train_dataset = train_dataset.map(train_map_fn)
+        test_dataset = test_dataset.map(train_map_fn)
 
         if args.num_workers and args.num_workers > 0:
             import torch.multiprocessing as mp
@@ -356,7 +358,7 @@ if __name__ == "__main__":
         train_dataloader = DataLoader(
             train_dataset,
             batch_size=train_config.source_batch_size,
-            collate_fn=collate_fn,
+            collate_fn=train_collate_fn,
             num_workers=args.num_workers,
             multiprocessing_context=ctx,
         )
@@ -364,7 +366,7 @@ if __name__ == "__main__":
         test_dataloader = DataLoader(
             test_dataset,
             batch_size=train_config.source_batch_size,
-            collate_fn=collate_fn,
+            collate_fn=train_collate_fn,
             num_workers=args.num_workers,
             multiprocessing_context=ctx,
         )
