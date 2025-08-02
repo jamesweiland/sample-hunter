@@ -263,7 +263,6 @@ def dataloader_worker_init_fn(_, function, preprocess_config, obfuscator_config,
 
 
 def preprocess_progress_listener(queue: mp.Queue, total: int, desc: str):
-    print("in listener")
     with tqdm(total=total, desc=desc) as pbar:
         count = 0
         while count < total:
