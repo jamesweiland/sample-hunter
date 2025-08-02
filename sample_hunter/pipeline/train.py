@@ -346,17 +346,27 @@ if __name__ == "__main__":
         train_dataset = train_dataset.map(map_fn)
         test_dataset = test_dataset.map(map_fn)
 
+        if args.num_workers and args.num_workers > 0:
+            import torch.multiprocessing as mp
+
+            ctx = mp.get_context("spawn")
+        else:
+            ctx = None
+
         train_dataloader = DataLoader(
             train_dataset,
             batch_size=train_config.source_batch_size,
             collate_fn=collate_fn,
             num_workers=args.num_workers,
+            multiprocessing_context=ctx,
         )
 
         test_dataloader = DataLoader(
             test_dataset,
             batch_size=train_config.source_batch_size,
             collate_fn=collate_fn,
+            num_workers=args.num_workers,
+            multiprocessing_context=ctx,
         )
 
         if args.num:
