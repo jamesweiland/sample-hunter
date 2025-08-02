@@ -21,7 +21,7 @@ musan: "/content/drive/MyDrive/sample-hunter/musan"
 
 # train config
 source_batch_size: 200
-sub_batch_size: 1800
+sub_batch_size: 1600
 learning_rate: 0.005
 num_epochs: 10
 alpha: 0.5
