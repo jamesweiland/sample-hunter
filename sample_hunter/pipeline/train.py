@@ -1,4 +1,6 @@
+import json
 import traceback
+import uuid
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -270,6 +272,8 @@ if __name__ == "__main__":
 
             def map_fn(ex):
                 try:
+                    if isinstance(ex["json"], bytes):
+                        ex["json"] = json.loads(ex["json"].decode("utf-8"))
                     positive, anchor = preprocessor(ex["mp3"], train=True)
                     pbar.update()
                     return {**ex, "positive": positive, "anchor": anchor}
@@ -287,9 +291,16 @@ if __name__ == "__main__":
                     song for song in songs if "anchor" in song and "positive" in song
                 ]
 
-                keys = torch.tensor([int(song["__key__"]) for song in songs])
-                windows_per_song = [song["anchor"].shape[0] for song in songs]
-                keys = torch.repeat_interleave(keys, torch.tensor(windows_per_song))
+                keys = [song["json"]["id"] for song in songs]
+                keys = [uuid.UUID(key).int for key in keys]
+                # one-hot encode keys as int64
+                uuid_to_key = {u: i for i, u in enumerate(keys)}
+                keys = torch.tensor([uuid_to_key[u] for u in keys])
+
+                windows_per_song = torch.tensor(
+                    [song["anchor"].shape[0] for song in songs]
+                )
+                keys = torch.repeat_interleave(keys, windows_per_song)
 
                 anchors = torch.cat([song["anchor"] for song in songs], dim=0)
                 positives = torch.cat([song["positive"] for song in songs], dim=0)
@@ -299,111 +310,113 @@ if __name__ == "__main__":
 
                 return [(anchor, positive, k) for anchor, positive, k in sub_batches]
 
-        # load the datasets, try to get them local first and if not, load from hf
-        if Path(args.dataset).exists():
-            # load locally
-            dataset_dir = Path(args.dataset)
+            # load the datasets, try to get them local first and if not, load from hf
+            if Path(args.dataset).exists():
+                # load locally
+                dataset_dir = Path(args.dataset)
 
-            train_tars = (dataset_dir / "train").glob("*.tar")
-            test_tars = (dataset_dir / "test").glob("*.tar")
+                train_tars = (dataset_dir / "train").glob("*.tar")
+                test_tars = (dataset_dir / "test").glob("*.tar")
 
-            # have to convert the paths to str
-            train_tars = [str(tar) for tar in train_tars]
-            test_tars = [str(tar) for tar in test_tars]
+                # have to convert the paths to str
+                train_tars = [str(tar) for tar in train_tars]
+                test_tars = [str(tar) for tar in test_tars]
 
-            train_dataset = wds.WebDataset(train_tars)
-            test_dataset = wds.WebDataset(test_tars)
+                train_dataset = wds.WebDataset(train_tars)
+                test_dataset = wds.WebDataset(test_tars)
 
-        else:
-            # load from hf
-            train_dataset = cast(
-                wds.WebDataset,
-                load_webdataset(
-                    args.dataset,
-                    "train",
-                    token=args.token,
-                    cache_dir=train_config.cache_dir,
-                ),
-            )
-            test_dataset = cast(
-                wds.WebDataset,
-                load_webdataset(
-                    args.dataset,
-                    "test",
-                    token=args.token,
-                    cache_dir=train_config.cache_dir,
-                ),
-            )
-
-        train_dataset = train_dataset.map(map_fn)
-        test_dataset = test_dataset.map(map_fn)
-
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_size=train_config.source_batch_size,
-            collate_fn=collate_fn,
-        )
-
-        test_dataloader = DataLoader(
-            test_dataset,
-            batch_size=train_config.source_batch_size,
-            collate_fn=collate_fn,
-        )
-
-        if args.num:
-            train_dataset = train_dataset.slice(args.num)
-
-        if args.continue_:
-            if not args.from_:
-                raise ValueError("--continue was given with no model to load in")
-            if not args.from_.exists():
-                raise ValueError(f"--from not found: {args.from_}")
-            if not str(args.from_.stem).split("-")[-1].isdigit():
-                raise ValueError(
-                    f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
-                    "The stem must follow the format: <stem_name>-<epoch>"
+            else:
+                # load from hf
+                train_dataset = cast(
+                    wds.WebDataset,
+                    load_webdataset(
+                        args.dataset,
+                        "train",
+                        token=args.token,
+                        cache_dir=train_config.cache_dir,
+                    ),
+                )
+                test_dataset = cast(
+                    wds.WebDataset,
+                    load_webdataset(
+                        args.dataset,
+                        "test",
+                        token=args.token,
+                        cache_dir=train_config.cache_dir,
+                    ),
                 )
 
-            epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
-            if epochs_already_trained >= train_config.num_epochs:
-                raise ValueError(
-                    "The model has already been trained for more epochs than specified in the config for num_epochs\n"
-                    f"Epochs already trained: {epochs_already_trained}\n"
-                    f"Config num_epochs: {train_config.num_epochs}"
+            train_dataset = train_dataset.map(map_fn)
+            test_dataset = test_dataset.map(map_fn)
+
+            train_dataloader = DataLoader(
+                train_dataset,
+                batch_size=train_config.source_batch_size,
+                collate_fn=collate_fn,
+            )
+
+            test_dataloader = DataLoader(
+                test_dataset,
+                batch_size=train_config.source_batch_size,
+                collate_fn=collate_fn,
+            )
+
+            if args.num:
+                train_dataset = train_dataset.slice(args.num)
+
+            if args.continue_:
+                if not args.from_:
+                    raise ValueError("--continue was given with no model to load in")
+                if not args.from_.exists():
+                    raise ValueError(f"--from not found: {args.from_}")
+                if not str(args.from_.stem).split("-")[-1].isdigit():
+                    raise ValueError(
+                        f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
+                        "The stem must follow the format: <stem_name>-<epoch>"
+                    )
+
+                epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
+                if epochs_already_trained >= train_config.num_epochs:
+                    raise ValueError(
+                        "The model has already been trained for more epochs than specified in the config for num_epochs\n"
+                        f"Epochs already trained: {epochs_already_trained}\n"
+                        f"Config num_epochs: {train_config.num_epochs}"
+                    )
+
+                model = load_model(args.from_, encoder_net_config)
+                num_epochs = range(
+                    epochs_already_trained + 1, train_config.num_epochs + 1
                 )
+            elif args.from_:
+                if not args.from_.exists():
+                    raise ValueError(f"--from not found: {args.from_}")
 
-            model = load_model(args.from_, encoder_net_config)
-            num_epochs = range(epochs_already_trained + 1, train_config.num_epochs + 1)
-        elif args.from_:
-            if not args.from_.exists():
-                raise ValueError(f"--from not found: {args.from_}")
+                model = load_model(args.from_, encoder_net_config)
+                num_epochs = range(1, train_config.num_epochs + 1)
+            else:
+                # make a new model
+                model = EncoderNet(encoder_net_config).to(DEVICE)  # type: ignore
+                num_epochs = range(1, train_config.num_epochs + 1)
 
-            model = load_model(args.from_, encoder_net_config)
-            num_epochs = range(1, train_config.num_epochs + 1)
-        else:
-            # make a new model
-            model = EncoderNet(encoder_net_config).to(DEVICE)  # type: ignore
-            num_epochs = range(1, train_config.num_epochs + 1)
+            save_per_epoch = args.out if args.save_per_epoch else None
 
-        save_per_epoch = args.out if args.save_per_epoch else None
+            adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
+            triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
 
-        adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
-        triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
-
-        train(
-            model=model,
-            train_dataloader=train_dataloader,
-            test_dataloader=test_dataloader,
-            optimizer=adam,
-            loss_fn=triplet_loss,
-            mine_strategy=train_config.mine_strategy,
-            log_dir=train_config.tensorboard_log_dir,
-            tensorboard=train_config.tensorboard,
-            device=DEVICE,
-            num_epochs=num_epochs,
-            triplet_loss_margin=train_config.triplet_loss_margin,
-            save_per_epoch=save_per_epoch,
-        )
+            train(
+                model=model,
+                train_dataloader=train_dataloader,
+                test_dataloader=test_dataloader,
+                optimizer=adam,
+                loss_fn=triplet_loss,
+                mine_strategy=train_config.mine_strategy,
+                log_dir=train_config.tensorboard_log_dir,
+                tensorboard=train_config.tensorboard,
+                device=DEVICE,
+                num_epochs=num_epochs,
+                triplet_loss_margin=train_config.triplet_loss_margin,
+                save_per_epoch=save_per_epoch,
+            )
 
         torch.save(model.state_dict(), args.out)
         print(f"Model saved to {args.out}")
