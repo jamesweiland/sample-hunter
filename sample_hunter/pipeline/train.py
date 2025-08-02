@@ -339,6 +339,7 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    mp.set_start_method("spawn", force=True)
 
     if args.config:
         preprocess_config = PreprocessConfig.from_yaml(args.config)
