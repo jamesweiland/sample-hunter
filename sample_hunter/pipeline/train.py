@@ -1,4 +1,5 @@
 import json
+import sys
 import traceback
 import uuid
 import torch
@@ -269,19 +270,24 @@ def preprocess_progress_listener(queue: mp.Queue, total: int, desc: str):
         count = 0
         while count < total:
             try:
-                msg = queue.get()
+                msg = queue.get(timeout=120.0)
                 if msg == "DONE":
                     return
                 elif msg == "RESET":
                     new_desc = queue.get()
                     pbar.reset()
                     pbar.set_description(new_desc)
+                    pbar.refresh()
+                    sys.stdout.flush()
                     count = 0
                 else:
                     pbar.update(msg)
+                    pbar.refresh()
+                    sys.stdout.flush()
                     count += msg
 
             except Exception as e:
+                traceback.print_exc()
                 break
 
 
