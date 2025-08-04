@@ -52,6 +52,8 @@ class TrainDataloader:
                 with tqdm(
                     total=self.config.source_batch_size,
                     desc=f"Processing batch {batch_num}...",
+                    mininterval=0,
+                    miniters=1,
                 ) as pbar:
                     with ThreadPoolExecutor(
                         max_workers=self.config.num_threads
