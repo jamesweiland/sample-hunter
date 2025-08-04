@@ -44,8 +44,8 @@ def train_single_epoch(
     num_batches = 0
     epoch_total_accuracy = 0
     for anchor, positive, keys in dataloader:
-        anchor_batch = anchor.to(device).requires_grad_(True)
-        positive_batch = positive.to(device).requires_grad_(True)
+        anchor_batch = anchor.to(device)
+        positive_batch = positive.to(device)
         keys = keys.to(device)
 
         # predict embeddings
@@ -146,6 +146,8 @@ def train(
 
         writer = SummaryWriter(log_dir=log_dir)
 
+    model.train()
+
     for i in num_epochs:
         print(f"Epoch {i}")
         loss, accuracy = train_single_epoch(
@@ -234,7 +236,6 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-    # mp.set_start_method("spawn", force=True)
 
     if args.config:
         preprocess_config = PreprocessConfig.from_yaml(args.config)
