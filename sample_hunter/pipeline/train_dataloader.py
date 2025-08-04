@@ -49,29 +49,31 @@ class TrainDataloader:
                 ]
 
                 preprocessed_examples = []
-                with ThreadPoolExecutor(
-                    max_workers=self.config.num_threads
-                ) as executor:
-                    futures = [
-                        executor.submit(
-                            self._preprocess_example,
-                            dataset_iter,
-                            preprocessors[i % len(preprocessors)],
-                        )
-                        for i in range(self.config.source_batch_size)
-                    ]
+                with tqdm(
+                    total=self.config.source_batch_size,
+                    desc=f"Processing batch {batch_num}...",
+                ) as pbar:
+                    with ThreadPoolExecutor(
+                        max_workers=self.config.num_threads
+                    ) as executor:
+                        futures = [
+                            executor.submit(
+                                self._preprocess_example,
+                                dataset_iter,
+                                preprocessors[i % len(preprocessors)],
+                            )
+                            for i in range(self.config.source_batch_size)
+                        ]
 
-                    for future in tqdm(
-                        as_completed(futures),
-                        total=self.config.source_batch_size,
-                        desc=f"Processing batch {batch_num}",
-                    ):
-                        result = future.result()
-                        if result is not None:
-                            preprocessed_examples.append(result)
+                        for future in as_completed(futures):
+                            result = future.result()
+                            if result is not None:
+                                preprocessed_examples.append(result)
+                            pbar.update()
 
                 # clean up preprocessors
                 [preprocessor.__exit__() for preprocessor in preprocessors]
+                batch_num += 1
 
                 yield from self._collate(preprocessed_examples)
             except StopIteration:
