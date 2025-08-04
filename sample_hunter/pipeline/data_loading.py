@@ -14,9 +14,13 @@ import torchaudio
 import webdataset as wds
 import re
 import traceback
+from tqdm.notebook import tqdm
 
 from sample_hunter._util import HF_TOKEN, DEVICE
 from sample_hunter.config import DEFAULT_CACHE_DIR
+
+
+
 
 
 def load_tensor_from_bytes(

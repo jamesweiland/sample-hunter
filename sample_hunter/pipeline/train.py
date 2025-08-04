@@ -1,27 +1,15 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import json
-import sys
-import traceback
-import uuid
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
-import torch.multiprocessing as mp
-from typing import Any, Callable, Dict, List, Tuple, cast
+from typing import Callable, Tuple, cast
 import argparse
 from pathlib import Path
-from tqdm import tqdm
 import webdataset as wds
-import threading
-import functools
 
-from .data_loading import load_tensor_from_bytes, load_webdataset
+from .train_dataloader import TrainDataloader
+from .data_loading import load_webdataset
 from .encoder_net import EncoderNet
-from .data_loading import collate_spectrograms, flatten_sub_batches
-from .transformations.obfuscator import Obfuscator
-from .transformations.preprocessor import Preprocessor
 from .triplet_loss import triplet_accuracy, mine_negative
 from .evaluate import evaluate
 from sample_hunter.config import (
@@ -40,7 +28,7 @@ from sample_hunter._util import (
 
 def train_single_epoch(
     model: nn.Module,
-    dataloader: DataLoader,
+    dataloader: TrainDataloader,
     loss_fn: Callable[..., Tensor],
     mine_strategy: str,
     optimizer: torch.optim.Optimizer,
@@ -55,7 +43,7 @@ def train_single_epoch(
     epoch_total_loss = 0
     num_batches = 0
     epoch_total_accuracy = 0
-    for anchor, positive, keys in flatten_sub_batches(dataloader):
+    for anchor, positive, keys in dataloader:
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
@@ -104,7 +92,7 @@ def train_single_epoch(
 
 def train(
     model: nn.Module,
-    train_dataloader: DataLoader,
+    train_dataloader: TrainDataloader,
     loss_fn: Callable,
     mine_strategy: str,
     optimizer: torch.optim.Optimizer,
@@ -112,7 +100,7 @@ def train(
     triplet_loss_margin: float,
     tensorboard: str = "none",
     log_dir: Path | None = None,
-    test_dataloader: DataLoader | None = None,
+    test_dataloader: TrainDataloader | None = None,
     save_per_epoch: Path | None = None,
     device: str = DEVICE,
 ):
@@ -198,243 +186,8 @@ def train(
     print("Finished training")
 
 
-def train_map_fn(ex):
-    with train_map_fn.preprocessor as preprocessor:  # type: ignore
-        try:
-            if isinstance(ex["json"], bytes):
-                ex["json"] = json.loads(ex["json"].decode("utf-8"))
-            positive, anchor = preprocessor(ex["mp3"], train=True)
-            train_map_fn.queue.put(1)  # type: ignore
-            return {**ex, "positive": positive, "anchor": anchor}
-        except Exception as e:
-            print(f"An error occurred trying to process {ex["json"]["title"]}")
-            print(str(e))
-
-            traceback.print_exc()
-            return ex
-
-
-batch_num = 1
-
-
-def train_collate_fn(songs, preprocess_progress_queue: mp.Queue, sub_batch_size: int):
-    global batch_num
-    batch_num += 1
-    preprocess_progress_queue.put("RESET")
-    preprocess_progress_queue.put(f"Preprocessing batch {batch_num}...")
-
-    # filter out songs where preprocessing failed
-    songs = [song for song in songs if "anchor" in song and "positive" in song]
-
-    keys = [song["json"]["id"] for song in songs]
-    keys = [uuid.UUID(key).int for key in keys]
-    # one-hot encode keys as int64
-    uuid_to_key = {u: i for i, u in enumerate(keys)}
-    keys = torch.tensor([uuid_to_key[u] for u in keys])
-
-    windows_per_song = torch.tensor([song["anchor"].shape[0] for song in songs])
-    keys = torch.repeat_interleave(keys, windows_per_song)
-
-    anchors = torch.cat([song["anchor"] for song in songs], dim=0)
-    positives = torch.cat([song["positive"] for song in songs], dim=0)
-    sub_batches = collate_spectrograms((anchors, positives, keys), sub_batch_size)
-
-    return [(anchor, positive, k) for anchor, positive, k in sub_batches]
-
-
-def _init_dataloader_worker(
-    function,
-    preprocess_config: PreprocessConfig,
-    obfuscator_config: ObfuscatorConfig,
-    queue: mp.Queue,
-):
-    function.queue = queue
-    function.preprocessor = Preprocessor(
-        preprocess_config, obfuscator=Obfuscator(obfuscator_config)
-    )
-
-
-def dataloader_worker_init_fn(_, function, preprocess_config, obfuscator_config, queue):
-    _init_dataloader_worker(
-        function=function,
-        preprocess_config=preprocess_config,
-        obfuscator_config=obfuscator_config,
-        queue=queue,
-    )
-
-
-def parallelized_map_fn(ex):
-    if isinstance(ex["json"], bytes):
-        ex["json"] = json.loads(ex["json"].decode("utf-8"))
-
-    audio_tensor, sr = load_tensor_from_bytes(ex["mp3"])
-    ex["audio_tensor"] = audio_tensor
-    return ex
-
-
-def _init_collate_worker(
-    func,
-    preprocess_config: PreprocessConfig,
-    obfuscator_config: ObfuscatorConfig,
-    num_workers: int,
-    device: str = DEVICE,
-):
-    func.streams = [torch.cuda.Stream(device=device) for _ in range(num_workers)]
-    func.preprocessors = [
-        Preprocessor(preprocess_config, obfuscator=Obfuscator(obfuscator_config))
-        for _ in range(num_workers)
-    ]
-
-
-def multithreaded_map_fn(ex):
-    if isinstance(ex["json"], bytes):
-        ex["json"] = json.loads(ex["json"].decode("utf-8"))
-
-    audio_tensor, sr = load_tensor_from_bytes(ex["mp3"])
-    ex["audio_tensor"] = audio_tensor
-    return ex
-
-
-def preprocess_example(example, preprocessor: Preprocessor):
-    try:
-        positive, anchor = preprocessor(
-            example["audio_tensor"],
-            sample_rate=example["json"]["sample_rate"],
-            train=True,
-        )
-        example["positive"] = positive
-        example["anchor"] = anchor
-        return example
-    except Exception as e:
-        print(f"An error occurred trying to preprocess {example["json"]["title"]}")
-        traceback.print_exc()
-        return None
-
-
-def parallel_collate_fn(
-    songs: List[Dict[str, Any]],
-    num_threads: int,
-    sub_batch_size: int,
-    preprocess_config: PreprocessConfig,
-    obfuscator_config: ObfuscatorConfig,
-    device: str = DEVICE,
-):
-    print("Entered collate function")
-    with torch.no_grad():
-        # initialize and set up preprocessors
-        preprocessors = [
-            Preprocessor(
-                preprocess_config, obfuscator=Obfuscator(obfuscator_config)
-            ).__enter__()
-            for _ in range(num_threads)
-        ]
-
-        preprocessed_examples = []
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = []
-            for i, example in enumerate(songs):
-                preprocessor = preprocessors[i % num_threads]
-                futures.append(
-                    executor.submit(preprocess_example, example, preprocessor)
-                )
-
-            for future in tqdm(as_completed(futures), total=len(songs)):
-                result = future.result()
-
-                # filter out failed examples
-                if result is not None:
-                    preprocessed_examples.append(result)
-
-        # once the preprocessing is done, make sure to clean up
-        [preprocessor.__exit__() for preprocessor in preprocessors]
-
-        # get a list of ids
-        unique_ids = [song["json"]["id"] for song in preprocessed_examples]
-        uuid_to_int = {u: i for i, u in enumerate(unique_ids)}
-        unique_ids = torch.tensor([uuid_to_int[u] for u in unique_ids], device=device)
-        windows_per_song = torch.tensor(
-            [s["anchor"].shape[0] for s in preprocessed_examples], device=device
-        )
-
-        # set up the big tensors with everything
-        ids = torch.repeat_interleave(unique_ids, windows_per_song)
-        positives = torch.cat(
-            [song["positive"] for song in preprocessed_examples], dim=0
-        )
-        anchors = torch.cat([song["anchor"] for song in preprocessed_examples], dim=0)
-
-        # split the combined data into shuffled sub-batches
-        sub_batches = collate_spectrograms(
-            (anchors, positives, ids), sub_batch_size, shuffle=True
-        )
-        return [(a, p, i) for a, p, i in sub_batches]
-
-
-# def parallel_collate_fn(songs, num_workers, device):
-#     stream_batch_size = len(songs) // len(num_workers)
-#     positives = []
-#     anchors = []
-#     ids = []
-#     unique_ids = []
-#     streams = [torch.cuda.Stream(device=device) for _ in range(num_workers)]
-#     for i in range(num_workers):
-#         start = i * stream_batch_size
-#         end = start + stream_batch_size if i != len(num_workers - 1) else len(songs) - 1
-#         batch = songs[start:end]
-#         with torch.cuda.Stream(streams[i]):
-#             with Preprocessor(preprocess_config, obfuscator=Obfuscator(obfuscator_config)) as preprocessor:
-#                 for song in batch:
-#                     positive, anchor = preprocessor(song["audio_tensor"], sample_rate=song["json"]["sample_rate"], train=True)
-#                     positives.append(positive)
-#                     anchors.append(anchor)
-#                     ids.extend([uuid.UUID(song["json"]["id"]).int] * positive.shape[0])
-#                     unique_ids.append(song["json"]["id"])
-
-#     [s.synchronize() for s in streams]
-
-#     positives = torch.cat(positives, dim=0)
-#     anchors = torch.cat(anchors, dim=0)
-#     # one-hot encode ids
-#     uuid_to_int = {u: i for i, u in enumerate(unique_ids)}
-#     ids = [uuid_to_int[u] for u in ids]
-#     return positives, anchors, ids
-
-
-def preprocess_progress_listener(queue: mp.Queue, total: int, desc: str):
-    with tqdm(total=total, desc=desc) as pbar:
-        count = 0
-        while count < total:
-            try:
-                msg = queue.get(timeout=120.0)
-                print(f"msg: {msg}")
-                if msg == "DONE":
-                    return
-                elif msg == "RESET":
-                    new_desc = queue.get()
-                    pbar.reset()
-                    pbar.set_description(new_desc)
-                    pbar.refresh()
-                    sys.stdout.flush()
-                    count = 0
-                else:
-                    pbar.update(msg)
-                    pbar.refresh()
-                    sys.stdout.flush()
-                    count += msg
-
-            except Exception as e:
-                traceback.print_exc()
-                break
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--num-threads",
-        type=int,
-        help="The number of threads to use for preprocessing",
-    )
 
     parser.add_argument(
         "--config",
@@ -530,44 +283,20 @@ if __name__ == "__main__":
             ),
         )
 
-    train_dataset = train_dataset.map(multithreaded_map_fn)
-    test_dataset = test_dataset.map(multithreaded_map_fn)
-
-    if args.num_threads is None or args.num_threads <= 1:
-        raise NotImplementedError("sequential isn't supported yet")
-
-    cf = functools.partial(
-        parallel_collate_fn,
-        num_threads=args.num_threads,
-        sub_batch_size=train_config.sub_batch_size,
+    train_dataloader = TrainDataloader(
+        dataset=train_dataset,
+        config=train_config,
         preprocess_config=preprocess_config,
         obfuscator_config=obfuscator_config,
         device=DEVICE,
     )
 
-    # cf = functools.partial(
-    #     train_collate_fn,
-    #     preprocess_progress_queue=preprocess_progress_queue,
-    #     sub_batch_size=train_config.sub_batch_size,
-    # )
-    # init_worker = functools.partial(
-    #     dataloader_worker_init_fn,
-    #     function=train_map_fn,
-    #     preprocess_config=preprocess_config,
-    #     obfuscator_config=obfuscator_config,
-    #     queue=preprocess_progress_queue,
-    # )
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=train_config.source_batch_size,
-        collate_fn=cf,
-    )
-
-    test_dataloader = DataLoader(
-        test_dataset,
-        batch_size=train_config.source_batch_size,
-        collate_fn=cf,
+    test_dataloader = TrainDataloader(
+        dataset=test_dataset,
+        config=train_config,
+        preprocess_config=preprocess_config,
+        obfuscator_config=obfuscator_config,
+        device=DEVICE,
     )
 
     if args.num:

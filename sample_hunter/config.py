@@ -151,6 +151,7 @@ class TrainConfig(YAMLConfig):
     tensorboard: str = "epoch"  # can be "none", "batch", or "epoch"
     cache_dir: Path = Path(DEFAULT_CACHE_DIR)
     mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY
+    num_threads: int = 2
 
 
 @dataclass
