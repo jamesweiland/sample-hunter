@@ -74,7 +74,9 @@ class TrainDataloader:
                             pbar.update()
 
                 # clean up preprocessors
-                [preprocessor.__exit__() for preprocessor in preprocessors]
+                for preprocessor in preprocessors:
+                    preprocessor.__exit__()
+                    del preprocessor
                 torch.cuda.empty_cache()
                 batch_num += 1
 
