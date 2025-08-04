@@ -46,7 +46,7 @@ def train_single_epoch(
     for anchor, positive, keys in dataloader:
         anchor_batch = anchor.to(device).requires_grad_(True)
         positive_batch = positive.to(device).requires_grad_(True)
-        keys = keys.to(device).requires_grad_(True)
+        keys = keys.to(device)
 
         # predict embeddings
         anchor_embeddings = model(anchor_batch)
