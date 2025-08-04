@@ -29,7 +29,7 @@ tensorboard_log_dir: "/content/drive/MyDrive/sample-hunter/8-1-2025/logs"
 tensorboard: "epoch"
 cache_dir: "/content/drive/MyDrive/sample-hunter/cache"
 mine_strategy: "hard"
-num_threads: 2
+num_threads: 15
 
 # encodernet architecture hyperparameters
 kernel_stride: 1
