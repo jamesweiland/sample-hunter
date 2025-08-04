@@ -15,15 +15,19 @@ import webdataset as wds
 import re
 import traceback
 
-from sample_hunter._util import HF_TOKEN
+from sample_hunter._util import HF_TOKEN, DEVICE
 from sample_hunter.config import DEFAULT_CACHE_DIR
 
 
-def load_tensor_from_bytes(initial_bytes: Buffer) -> Tuple[torch.Tensor, int]:
+def load_tensor_from_bytes(
+    initial_bytes: Buffer, device: str = DEVICE
+) -> Tuple[torch.Tensor, int]:
     with io.BytesIO(initial_bytes) as buffer:
         audio, sr = torchaudio.load(buffer, format="mp3", backend="ffmpeg")
         if audio.ndim == 1:
             audio = audio.unsqueeze(0)
+
+    audio = audio.to(device)
     return audio, sr
 
 
