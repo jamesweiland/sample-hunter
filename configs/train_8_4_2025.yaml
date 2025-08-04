@@ -1,0 +1,49 @@
+#"global" params
+sample_rate: 44100
+hop_length: 512
+n_fft: 1024
+n_mels: 64
+spec_num_sec: 1.0
+
+# preprocess config
+step_num_sec: 0.5
+volume_threshold: -50
+
+# obfuscator config
+time_stretch_factors: [0.75, 1.0, 1.25, 1.5]
+pitch_factors: [0.6, 0.8, 1.0, 1.2, 1.5]
+lowpass_range: [6000, 12000]
+highpass_range: [20, 1000]
+musan_noise_range: [-5, 5]
+offset_span: 0.1
+lowpass_frac: 0.5
+musan: "/content/drive/MyDrive/sample-hunter/musan"
+
+# train config
+source_batch_size: 200
+sub_batch_size: 1600
+learning_rate: 0.005
+num_epochs: 10
+alpha: 0.5
+tensorboard_log_dir: "/content/drive/MyDrive/sample-hunter/8-1-2025/logs"
+tensorboard: "epoch"
+cache_dir: "/content/drive/MyDrive/sample-hunter/cache"
+mine_strategy: "hard"
+num_threads: 2
+
+# encodernet architecture hyperparameters
+kernel_stride: 1
+kernel_padding: 1
+pool_kernel_size: 2
+conv_layer_dims:
+  - [1, 16]
+  - [16, 32]
+  - [32, 64]
+  - [64, 128]
+  - [128, 256]
+  - [256, 384]
+  - [384, 512]
+min_dims: [1, 1]
+num_branches: 4
+divide_and_encode_hidden_dim: 256
+embedding_dim: 128
