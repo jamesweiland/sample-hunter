@@ -109,8 +109,8 @@ class TrainDataloader:
             sub_batches = collate_spectrograms(
                 (anchors, positives, ids), self.config.sub_batch_size, shuffle=True
             )
-            for sub_batch in sub_batches:
-                yield sub_batch
+        for sub_batch in sub_batches:
+            yield sub_batch
 
     def _preprocess_example(self, dataset_iter, preprocessor: Preprocessor):
         with torch.no_grad():
@@ -143,12 +143,11 @@ class TrainDataloader:
                 return None
 
     def _map_fn(self, ex):
-        with torch.no_grad():
-            if isinstance(ex["json"], bytes):
-                ex["json"] = json.loads(ex["json"].decode("utf-8"))
+        if isinstance(ex["json"], bytes):
+            ex["json"] = json.loads(ex["json"].decode("utf-8"))
 
-            ex["json"]["sample_rate"] = int(ex["json"]["sample_rate"])
+        ex["json"]["sample_rate"] = int(ex["json"]["sample_rate"])
 
-            audio_tensor, sr = load_tensor_from_bytes(ex["mp3"])
-            ex["audio_tensor"] = audio_tensor.to(self.device)
-            return ex
+        audio_tensor, sr = load_tensor_from_bytes(ex["mp3"])
+        ex["audio_tensor"] = audio_tensor.to(self.device)
+        return ex
