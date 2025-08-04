@@ -75,6 +75,7 @@ class TrainDataloader:
 
                 # clean up preprocessors
                 [preprocessor.__exit__() for preprocessor in preprocessors]
+                torch.cuda.empty_cache()
                 batch_num += 1
 
                 yield from self._collate(preprocessed_examples)
@@ -87,58 +88,67 @@ class TrainDataloader:
                 traceback.print_exc()
 
     def _collate(self, batch):
-        # filter out failed results
-        batch = [ex for ex in batch if ex is not None]
+        with torch.no_grad():
+            # filter out failed results
+            batch = [ex for ex in batch if ex is not None]
 
-        # one-hot encode ids
-        unique_ids = [ex["id"] for ex in batch]
-        uuid_to_int = {u: i for i, u in enumerate(unique_ids)}
-        unique_ids = torch.tensor(
-            [uuid_to_int[u] for u in unique_ids], device=self.device
-        )
-        windows_per_song = torch.tensor(
-            [ex["positive"].shape[0] for ex in batch], device=self.device
-        )
-        ids = torch.repeat_interleave(unique_ids, windows_per_song)
+            # one-hot encode ids
+            unique_ids = [ex["id"] for ex in batch]
+            uuid_to_int = {u: i for i, u in enumerate(unique_ids)}
+            unique_ids = torch.tensor(
+                [uuid_to_int[u] for u in unique_ids], device=self.device
+            )
+            windows_per_song = torch.tensor(
+                [ex["positive"].shape[0] for ex in batch], device=self.device
+            )
+            ids = torch.repeat_interleave(unique_ids, windows_per_song)
 
-        positives = torch.cat([ex["positive"] for ex in batch])
-        anchors = torch.cat([ex["anchor"] for ex in batch])
+            positives = torch.cat([ex["positive"] for ex in batch])
+            anchors = torch.cat([ex["anchor"] for ex in batch])
 
-        sub_batches = collate_spectrograms(
-            (anchors, positives, ids), self.config.sub_batch_size, shuffle=True
-        )
-        for sub_batch in sub_batches:
-            yield sub_batch
+            sub_batches = collate_spectrograms(
+                (anchors, positives, ids), self.config.sub_batch_size, shuffle=True
+            )
+            for sub_batch in sub_batches:
+                yield sub_batch
 
     def _preprocess_example(self, dataset_iter, preprocessor: Preprocessor):
-        example = None
-        try:
-            with self._lock:
-                example = next(dataset_iter)
+        with torch.no_grad():
+            example = None
+            try:
+                with self._lock:
+                    example = next(dataset_iter)
 
-            positive, anchor = preprocessor(
-                example["audio_tensor"],
-                sample_rate=example["json"]["sample_rate"],
-                train=True,
-            )
-            print("preprocessing done")
-            return {"positive": positive, "anchor": anchor, "id": example["json"]["id"]}
+                positive, anchor = preprocessor(
+                    example["audio_tensor"],
+                    sample_rate=example["json"]["sample_rate"],
+                    train=True,
+                )
+                print("preprocessing done")
+                return {
+                    "positive": positive,
+                    "anchor": anchor,
+                    "id": example["json"]["id"],
+                }
 
-        except StopIteration:
-            raise
+            except StopIteration:
+                raise
 
-        except Exception:
-            title = example["json"].get("title", "unknown") if example else "unknown"
-            print(f"An error occurred trying to preprocess {title}")
-            traceback.print_exc()
-            return None
+            except Exception:
+                title = (
+                    example["json"].get("title", "unknown") if example else "unknown"
+                )
+                print(f"An error occurred trying to preprocess {title}")
+                traceback.print_exc()
+                return None
 
     def _map_fn(self, ex):
-        if isinstance(ex["json"], bytes):
-            ex["json"] = json.loads(ex["json"].decode("utf-8"))
+        with torch.no_grad():
+            if isinstance(ex["json"], bytes):
+                ex["json"] = json.loads(ex["json"].decode("utf-8"))
 
-        ex["json"]["sample_rate"] = int(ex["json"]["sample_rate"])
+            ex["json"]["sample_rate"] = int(ex["json"]["sample_rate"])
 
-        audio_tensor, sr = load_tensor_from_bytes(ex["mp3"])
-        ex["audio_tensor"] = audio_tensor.to(self.device)
-        return ex
+            audio_tensor, sr = load_tensor_from_bytes(ex["mp3"])
+            ex["audio_tensor"] = audio_tensor.to(self.device)
+            return ex
