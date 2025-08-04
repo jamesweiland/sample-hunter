@@ -430,9 +430,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--num-workers",
+        "--num-threads",
         type=int,
-        help="The number of processes to use for dataloading",
+        help="The number of threads to use for preprocessing",
     )
 
     parser.add_argument(
