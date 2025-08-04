@@ -117,6 +117,7 @@ class TrainDataloader:
                 sample_rate=example["json"]["sample_rate"],
                 train=True,
             )
+            print("preprocessing done")
             return {"positive": positive, "anchor": anchor, "id": example["json"]["id"]}
 
         except StopIteration:
