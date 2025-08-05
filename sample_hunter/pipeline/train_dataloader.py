@@ -101,29 +101,22 @@ class TrainDataloader:
         self._obfuscator_config = obfuscator_config
         self._lock = threading.Lock()
         self._queue = queue.Queue()
-        self._producer = threading.Thread(target=self._preprocess_batch)
 
     def __iter__(self):
         self.batch_num = 1
-        self._producer.start()
+        dataset_iter = iter(self.dataset)
 
         while True:
             try:
-                result = self._queue.get()
+                batch = self._preprocess_batch(dataset_iter)
 
-                if result is None:
-                    # the dataset is totally exhausted
-                    self._producer.join()
-                    break
-
-                yield from self._collate(result)
+                yield from self._collate(batch)
 
             except Exception:
                 print("An error occured collating the batch")
                 traceback.print_exc()
 
-    def _preprocess_batch(self):
-        dataset_iter = iter(self.dataset)
+    def _preprocess_batch(self, dataset_iter):
         # set up the preprocessors
         preprocessors = [
             Preprocessor(
@@ -132,53 +125,42 @@ class TrainDataloader:
             ).__enter__()
             for _ in range(self.config.num_threads)
         ]
+        preprocessed_examples = []
+        try:
+            with tqdm(
+                total=self.config.source_batch_size,
+                desc=f"Processing batch {self.batch_num}...",
+                mininterval=0,
+                miniters=1,
+            ) as pbar:
+                with ThreadPoolExecutor(
+                    max_workers=self.config.num_threads
+                ) as executor:
+                    futures = [
+                        executor.submit(
+                            self._preprocess_example,
+                            dataset_iter,
+                            preprocessors[i % len(preprocessors)],
+                        )
+                        for i in range(self.config.source_batch_size)
+                    ]
 
-        while True:
-            try:
-
-                preprocessed_examples = []
-                with tqdm(
-                    total=self.config.source_batch_size,
-                    desc=f"Processing batch {self.batch_num}...",
-                    mininterval=0,
-                    miniters=1,
-                ) as pbar:
-                    with ThreadPoolExecutor(
-                        max_workers=self.config.num_threads
-                    ) as executor:
-                        futures = [
-                            executor.submit(
-                                self._preprocess_example,
-                                dataset_iter,
-                                preprocessors[i % len(preprocessors)],
-                            )
-                            for i in range(self.config.source_batch_size)
-                        ]
-
-                        for future in as_completed(futures):
-                            result = future.result()
-                            if result is not None:
-                                preprocessed_examples.append(result)
-                            pbar.update()
-                            time.sleep(0.1 if self._queue.empty else 5)
+                    for future in as_completed(futures):
+                        result = future.result()
+                        if result is not None:
+                            preprocessed_examples.append(result)
+                        pbar.update()
 
                 self.batch_num += 1
-                self._queue.put(preprocessed_examples)
-                # sleep for a bit to give priority to the consumer thread
-                print("sleeping for 15 seconds")
-                time.sleep(15)
-                print("done sleeping")
+                return preprocessed_examples
 
-            except StopIteration:
-                # give a sentinel to the queue to show the dataset is empty
-                self._queue.put(None)
-
-                # resource cleanup
-                for preprocessor in preprocessors:
-                    preprocessor.__exit__()
-                    del preprocessor
-                torch.cuda.empty_cache()
-                break
+        except StopIteration:
+            # resource cleanup
+            for preprocessor in preprocessors:
+                preprocessor.__exit__()
+                del preprocessor
+            torch.cuda.empty_cache()
+            return preprocessed_examples
 
     def _collate(self, batch):
         with torch.no_grad():
