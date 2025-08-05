@@ -63,6 +63,7 @@ class TrainDataloaderBuffer:
             if sub_batch is None:
                 break
             yield sub_batch
+            time.sleep(0.05)
 
     def _gpu_prefetcher(self):
         """fetch a sub batch from the cpu if necessary"""
@@ -158,9 +159,12 @@ class TrainDataloader:
                             if result is not None:
                                 preprocessed_examples.append(result)
                             pbar.update()
+                            time.sleep(0.1)
 
                 self.batch_num += 1
                 self._queue.put(preprocessed_examples)
+                # sleep for a bit to give priority to the consumer thread
+                time.sleep(15)
 
             except StopIteration:
                 # give a sentinel to the queue to show the dataset is empty
