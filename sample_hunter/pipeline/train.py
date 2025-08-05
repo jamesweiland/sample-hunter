@@ -44,6 +44,7 @@ def train_single_epoch(
     num_batches = 0
     epoch_total_accuracy = 0
     for anchor, positive, keys in dataloader:
+        print("new train iteration")
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
