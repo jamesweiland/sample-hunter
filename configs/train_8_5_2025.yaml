@@ -20,16 +20,16 @@ lowpass_frac: 0.5
 musan: "/content/drive/MyDrive/sample-hunter/musan"
 
 # train config
-source_batch_size: 200
+source_batch_size: 150
 sub_batch_size: 1600
 learning_rate: 0.005
 num_epochs: 10
-alpha: 0.5
-tensorboard_log_dir: "/content/drive/MyDrive/sample-hunter/8-1-2025/logs"
+triplet_loss_margin: 0.2
+tensorboard_log_dir: "/content/drive/MyDrive/sample-hunter/8-5-2025/logs"
 tensorboard: "epoch"
 cache_dir: "/content/drive/MyDrive/sample-hunter/cache"
 mine_strategy: "hard"
-num_threads: 15
+num_threads: 2
 
 # encodernet architecture hyperparameters
 kernel_stride: 1
