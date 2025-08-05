@@ -68,7 +68,7 @@ class TrainDataloaderBuffer:
 
     def _gpu_prefetcher(self):
         """fetch a sub batch from the cpu if necessary"""
-        while self.cpu_queue.not_empty:
+        while not self.cpu_queue.empty():
             if self.gpu_queue.qsize() < self.buffersize:
                 sub_batch = self.cpu_queue.get()
 
