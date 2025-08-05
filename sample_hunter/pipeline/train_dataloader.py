@@ -53,6 +53,7 @@ class TrainDataloaderBuffer:
 
     def __enter__(self):
         self.gpu_thread.start()
+        return self
 
     def __exit__(self, *exc):
         self.gpu_thread.join()
