@@ -1,16 +1,78 @@
 import torch
+import time
 import json
 import traceback
 import threading
+import queue
 import webdataset as wds
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm.notebook import tqdm
+from typing import List, Tuple
 
 from .transformations.preprocessor import Preprocessor
 from .transformations.obfuscator import Obfuscator
 from .data_loading import collate_spectrograms, load_tensor_from_bytes
 from sample_hunter._util import DEVICE
 from sample_hunter.config import TrainConfig, PreprocessConfig, ObfuscatorConfig
+
+
+class TrainDataloaderBuffer:
+    def __init__(
+        self,
+        data: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+        buffersize: int = 10,
+    ):
+        self.cpu_queue = queue.Queue()
+        self.gpu_queue = queue.Queue(maxsize=buffersize)
+        self.buffersize = buffersize
+
+        # push the first buffersize sub batches to the gpu queue, and
+        # move the rest to cpu then put on cpu queue
+
+        for i in range(min(buffersize, len(data))):
+            sub_batch = data[i]
+            self.gpu_queue.put(sub_batch)
+
+        for i in range(buffersize, len(data)):
+            sub_batch = data[i]
+            sub_batch_cpu = tuple(t.cpu() for t in sub_batch)
+            self.cpu_queue.put(sub_batch_cpu)
+
+            # we need to make sure that memory on the gpu is free'd or otherwise
+            # training will be bad
+            del sub_batch
+        torch.cuda.empty_cache()
+
+        self.gpu_thread = threading.Thread(target=self._gpu_prefetcher)
+
+        self.stop = False
+
+    def __enter__(self):
+        self.gpu_thread.start()
+
+    def __exit__(self, *exc):
+        self.gpu_thread.join()
+
+    def __iter__(self):
+        while True:
+            sub_batch = self.gpu_queue.get()
+            if sub_batch is None:
+                break
+            yield sub_batch
+
+    def _gpu_prefetcher(self):
+        """fetch a sub batch from the cpu if necessary"""
+        while self.cpu_queue.not_empty:
+            if self.gpu_queue.qsize() < self.buffersize:
+                sub_batch = self.cpu_queue.get()
+
+                # move the sub batch to cuda and schedule it by enqueueing
+                sub_batch = tuple(t.to("cuda") for t in sub_batch)
+                self.gpu_queue.put(sub_batch)
+
+            time.sleep(0.1)
+        # when we get here, it means there are no batches left
+        self.gpu_queue.put(None)
 
 
 class TrainDataloader:
@@ -32,26 +94,46 @@ class TrainDataloader:
         self._preprocess_config = preprocess_config
         self._obfuscator_config = obfuscator_config
         self._lock = threading.Lock()
+        self._queue = queue.Queue()
+        self._producer = threading.Thread(target=self._preprocess_batch)
 
     def __iter__(self):
-        dataset_iter = iter(self.dataset)
-        batch_num = 1
+        self.batch_num = 1
+        self._producer.start()
 
         while True:
             try:
-                # set up the preprocessors
-                preprocessors = [
-                    Preprocessor(
-                        self._preprocess_config,
-                        obfuscator=Obfuscator(self._obfuscator_config),
-                    ).__enter__()
-                    for _ in range(self.config.num_threads)
-                ]
+                result = self._queue.get()
+
+                if result is None:
+                    # the dataset is totally exhausted
+                    self._producer.join()
+                    break
+
+                yield from self._collate(result)
+
+            except Exception:
+                print("An error occured collating the batch")
+                traceback.print_exc()
+
+    def _preprocess_batch(self):
+        dataset_iter = iter(self.dataset)
+        # set up the preprocessors
+        preprocessors = [
+            Preprocessor(
+                self._preprocess_config,
+                obfuscator=Obfuscator(self._obfuscator_config),
+            ).__enter__()
+            for _ in range(self.config.num_threads)
+        ]
+
+        while True:
+            try:
 
                 preprocessed_examples = []
                 with tqdm(
                     total=self.config.source_batch_size,
-                    desc=f"Processing batch {batch_num}...",
+                    desc=f"Processing batch {self.batch_num}...",
                     mininterval=0,
                     miniters=1,
                 ) as pbar:
@@ -73,21 +155,19 @@ class TrainDataloader:
                                 preprocessed_examples.append(result)
                             pbar.update()
 
-                # clean up preprocessors
+                self.batch_num += 1
+                self._queue.put(preprocessed_examples)
+
+            except StopIteration:
+                # give a sentinel to the queue to show the dataset is empty
+                self._queue.put(None)
+
+                # resource cleanup
                 for preprocessor in preprocessors:
                     preprocessor.__exit__()
                     del preprocessor
                 torch.cuda.empty_cache()
-                batch_num += 1
-
-                yield from self._collate(preprocessed_examples)
-            except StopIteration:
-                # this means the dataset is totally exhausted
                 break
-
-            except Exception:
-                print("An error occured collating the batch")
-                traceback.print_exc()
 
     def _collate(self, batch):
         with torch.no_grad():
@@ -111,8 +191,12 @@ class TrainDataloader:
             sub_batches = collate_spectrograms(
                 (anchors, positives, ids), self.config.sub_batch_size, shuffle=True
             )
-        for sub_batch in sub_batches:
-            yield sub_batch
+            print(sub_batches[0][0].dtype)
+            print(sub_batches[0][1].dtype)
+            print(sub_batches[0][2].dtype)
+
+        with TrainDataloaderBuffer(sub_batches) as buffer:  # type: ignore
+            yield from buffer
 
     def _preprocess_example(self, dataset_iter, preprocessor: Preprocessor):
         with torch.no_grad():
