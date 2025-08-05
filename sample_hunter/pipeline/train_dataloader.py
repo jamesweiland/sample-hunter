@@ -164,7 +164,9 @@ class TrainDataloader:
                 self.batch_num += 1
                 self._queue.put(preprocessed_examples)
                 # sleep for a bit to give priority to the consumer thread
+                print("sleeping for 15 seconds")
                 time.sleep(15)
+                print("done sleeping")
 
             except StopIteration:
                 # give a sentinel to the queue to show the dataset is empty
