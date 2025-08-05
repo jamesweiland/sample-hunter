@@ -178,10 +178,14 @@ class TrainDataloader:
             unique_ids = [ex["id"] for ex in batch]
             uuid_to_int = {u: i for i, u in enumerate(unique_ids)}
             unique_ids = torch.tensor(
-                [uuid_to_int[u] for u in unique_ids], device=self.device
+                [uuid_to_int[u] for u in unique_ids],
+                device=self.device,
+                dtype=torch.int16,
             )
             windows_per_song = torch.tensor(
-                [ex["positive"].shape[0] for ex in batch], device=self.device
+                [ex["positive"].shape[0] for ex in batch],
+                device=self.device,
+                dtype=torch.int16,
             )
             ids = torch.repeat_interleave(unique_ids, windows_per_song)
 
