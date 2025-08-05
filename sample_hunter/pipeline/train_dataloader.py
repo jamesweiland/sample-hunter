@@ -34,14 +34,15 @@ class TrainDataloaderBuffer:
             self.gpu_queue.put(sub_batch)
 
         for i in range(buffersize, len(data)):
-            sub_batch = data[i]
-            sub_batch_cpu = tuple(t.cpu() for t in sub_batch)
-            self.cpu_queue.put(sub_batch_cpu)
+            with torch.no_grad():
+                sub_batch = data[i]
+                sub_batch_cpu = tuple(t.cpu() for t in sub_batch)
+                self.cpu_queue.put(sub_batch_cpu)
 
-            # we need to make sure that memory on the gpu is free'd or otherwise
-            # training will be bad
-            del sub_batch
-        torch.cuda.empty_cache()
+                # we need to make sure that memory on the gpu is free'd or otherwise
+                # training will be bad
+                del sub_batch
+                torch.cuda.empty_cache()
 
         self.gpu_thread = threading.Thread(target=self._gpu_prefetcher)
 
