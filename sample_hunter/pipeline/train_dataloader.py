@@ -159,7 +159,7 @@ class TrainDataloader:
                             if result is not None:
                                 preprocessed_examples.append(result)
                             pbar.update()
-                            time.sleep(0.1)
+                            time.sleep(0.1 if self._queue.empty else 5)
 
                 self.batch_num += 1
                 self._queue.put(preprocessed_examples)
