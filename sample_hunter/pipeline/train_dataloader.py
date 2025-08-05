@@ -107,6 +107,7 @@ class TrainDataloader:
         dataset_iter = iter(self.dataset)
 
         while True:
+            print("new dataloader iteration")
             try:
                 batch = self._preprocess_batch(dataset_iter)
 
@@ -117,6 +118,7 @@ class TrainDataloader:
                 traceback.print_exc()
 
     def _preprocess_batch(self, dataset_iter):
+        print("starting preprocessing batch")
         # set up the preprocessors
         preprocessors = [
             Preprocessor(
@@ -197,6 +199,7 @@ class TrainDataloader:
             yield from buffer
 
     def _preprocess_example(self, dataset_iter, preprocessor: Preprocessor):
+        print("preprocessing example")
         with torch.no_grad():
             example = None
             try:
