@@ -180,14 +180,15 @@ class TrainDataloader:
             unique_ids = torch.tensor(
                 [uuid_to_int[u] for u in unique_ids],
                 device=self.device,
-                dtype=torch.int16,
+                dtype=torch.int32,
             )
             windows_per_song = torch.tensor(
                 [ex["positive"].shape[0] for ex in batch],
                 device=self.device,
-                dtype=torch.int16,
+                dtype=torch.int32,
             )
             ids = torch.repeat_interleave(unique_ids, windows_per_song)
+            ids = ids.to(torch.int16)
 
             positives = torch.cat([ex["positive"] for ex in batch])
             anchors = torch.cat([ex["anchor"] for ex in batch])
