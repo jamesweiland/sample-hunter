@@ -22,6 +22,7 @@ class TrainDataloaderBuffer:
         data: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
         buffersize: int = 10,
     ):
+        print("initializing data buffer")
         self.cpu_queue = queue.Queue()
         self.gpu_queue = queue.Queue(maxsize=buffersize)
         self.buffersize = buffersize
@@ -33,7 +34,7 @@ class TrainDataloaderBuffer:
             sub_batch = data[i]
             self.gpu_queue.put(sub_batch)
 
-        for i in range(buffersize, len(data)):
+        for i in tqdm(range(buffersize, len(data)), desc="moving data to cpu"):
             with torch.no_grad():
                 sub_batch = data[i]
                 sub_batch_cpu = tuple(t.cpu() for t in sub_batch)
@@ -43,6 +44,8 @@ class TrainDataloaderBuffer:
                 # training will be bad
                 del sub_batch
                 torch.cuda.empty_cache()
+
+        print("all data moved to cpu")
 
         self.gpu_thread = threading.Thread(target=self._gpu_prefetcher)
 
