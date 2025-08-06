@@ -6,7 +6,7 @@ import threading
 import queue
 import webdataset as wds
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from typing import List, Tuple
 
 from .transformations.preprocessor import Preprocessor
