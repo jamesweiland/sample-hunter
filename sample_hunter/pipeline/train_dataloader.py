@@ -50,7 +50,7 @@ class TrainDataloaderBuffer:
         self.stop = False
 
     def __iter__(self):
-        while True:
+        while not self.gpu_queue.empty():
             sub_batch = self.gpu_queue.get()
             if sub_batch is None:
                 break
