@@ -10,7 +10,7 @@ import webdataset as wds
 from .train_dataloader import TrainDataloader
 from .data_loading import load_webdataset
 from .encoder_net import EncoderNet
-from .triplet_loss import triplet_accuracy, mine_negative
+from .triplet_loss import topk_triplet_accuracy, triplet_accuracy, mine_negative
 from .evaluate import evaluate
 from sample_hunter.config import (
     PreprocessConfig,
@@ -35,14 +35,16 @@ def train_single_epoch(
     device: str,
     triplet_loss_margin: float,
     writer: SummaryWriter | None = None,
-) -> Tuple[float, float]:
+) -> Tuple[float, float, float]:
     """
     Train `model` for a single epoch. Returns a (loss, accuracy) tuple
     """
     model.train()
-    epoch_total_loss = 0
+
     num_batches = 0
-    epoch_total_accuracy = 0
+    epoch_total_accuracy = 0.0
+    epoch_total_topk_accuracy = 0.0
+    epoch_total_loss = 0.0
     for anchor, positive, keys in dataloader:
         print("new train iteration")
         anchor_batch = anchor.to(device)
@@ -76,20 +78,26 @@ def train_single_epoch(
             margin=triplet_loss_margin,
         )
 
+        topk_accuracy = topk_triplet_accuracy(anchor_embeddings, positive_embeddings)
+
         if writer:
             writer.add_scalar("Training loss", loss.item(), num_batches)
             writer.add_scalar("Training accuracy", accuracy, num_batches)
+            writer.add_scalar("Training top K accuracy", topk_accuracy, num_batches)
 
         epoch_total_loss += loss.item()
         epoch_total_accuracy += accuracy
+        epoch_total_topk_accuracy += topk_accuracy
         num_batches += 1
         print("end of train iteration")
 
     epoch_average_loss = epoch_total_loss / num_batches
     print(f"Average loss of epoch: {epoch_average_loss}")
     epoch_average_accuracy = epoch_total_accuracy / num_batches
-    print(f"Epoch accuracy: {epoch_average_accuracy}")
-    return epoch_average_loss, epoch_average_accuracy  # type: ignore
+    print(f"Epoch accuracy: {epoch_average_accuracy:.2%}")
+    epoch_average_topk_accuracy = epoch_total_topk_accuracy / num_batches
+    print(f"Epoch top K accuracy: {epoch_average_topk_accuracy:.2%}")
+    return epoch_average_loss, epoch_average_accuracy, epoch_average_topk_accuracy  # type: ignore
 
 
 def train(
@@ -152,7 +160,7 @@ def train(
 
     for i in num_epochs:
         print(f"Epoch {i}")
-        loss, accuracy = train_single_epoch(
+        loss, accuracy, topk_accuracy = train_single_epoch(
             model=model,
             dataloader=train_dataloader,
             loss_fn=loss_fn,
@@ -165,6 +173,7 @@ def train(
         if tensorboard == "epoch":
             writer.add_scalar("Training loss", loss, i)  # type: ignore
             writer.add_scalar("Training accuracy", accuracy, i)  # type: ignore
+            writer.add_scalar("Training top K accuracy", topk_accuracy, i)  # type: ignore
 
         if save_per_epoch is not None and i != num_epochs.stop - 1:
             save_path = (
@@ -175,14 +184,16 @@ def train(
 
         if test_dataloader is not None:
             # evaluate accuracy as we go on the test set
-            accuracy = evaluate(
+            test_loss, test_accuracy, test_topk_accuracy = evaluate(
                 model=model,
                 dataloader=test_dataloader,
-                alpha=triplet_loss_margin,
+                margin=triplet_loss_margin,
                 device=device,
             )
             if tensorboard != "none":
-                writer.add_scalar("Testing accuracy", accuracy, i)  # type: ignore
+                writer.add_scalar("Testing accuracy", test_accuracy, i)  # type: ignore
+                writer.add_scalar("Testing loss", test_loss, i)  # type: ignore
+                writer.add_scalar("Testing top K accuracy", test_topk_accuracy, i)  # type: ignore
 
         print("--------------------------------------------")
     if tensorboard != "none":

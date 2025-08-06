@@ -1,20 +1,20 @@
 import torch.nn as nn
 import torch
-from typing import Literal
+from typing import Callable, Literal, Tuple
 
 from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_MINE_STRATEGY
 
 from .train_dataloader import TrainDataloader
-from .triplet_loss import triplet_accuracy, mine_negative
+from .triplet_loss import triplet_accuracy, mine_negative, topk_triplet_accuracy
 from sample_hunter._util import DEVICE
 
 
 def evaluate(
     model: nn.Module,
     dataloader: TrainDataloader,
-    alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN,
+    margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
     device: str = DEVICE,
-) -> float:
+) -> Tuple[float, float, float]:
     """
     Evaluate on a test dataset and return the average
     accuracy for the dataset
@@ -22,26 +22,34 @@ def evaluate(
     with torch.no_grad():
 
         sum_accuracy = 0.0
+        sum_loss = 0.0
+        sum_topk_accuracy = 0.0
         num_batches = 0
         for anchor, positive, keys in dataloader:
             anchor = anchor.to(device)
             positive = positive.to(device)
             keys = keys.to(device)
 
-            batch_accuracy = evaluate_batch(
+            batch_loss, batch_accuracy, batch_topk_accuracy = evaluate_batch(
                 model=model,
                 positive=positive,
                 anchor=anchor,
                 song_ids=keys,
-                alpha=alpha,
+                margin=margin,
                 device=device,
             )
             sum_accuracy += batch_accuracy
+            sum_loss += batch_loss
+            sum_topk_accuracy += batch_topk_accuracy
             num_batches += 1
 
         avg_accuracy = sum_accuracy / num_batches
-        print(f"Average test accuracy: {avg_accuracy}")
-        return avg_accuracy  # type: ignore
+        avg_loss = sum_loss / num_batches
+        avg_topk_accuracy = sum_topk_accuracy / num_batches
+        print(f"Average test loss: {avg_loss}")
+        print(f"Average test accuracy: {avg_accuracy:.2%}")
+        print(f"Average top K accuracy: {avg_topk_accuracy:.2%}")
+        return avg_loss, avg_accuracy, avg_topk_accuracy  # type: ignore
 
 
 def evaluate_batch(
@@ -50,10 +58,11 @@ def evaluate_batch(
     song_ids: torch.Tensor,
     anchor: torch.Tensor,
     mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY,
-    alpha: float = DEFAULT_TRIPLET_LOSS_MARGIN,
+    margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
+    loss_fn: Callable = torch.nn.TripletMarginLoss(margin=DEFAULT_TRIPLET_LOSS_MARGIN),
     device: str = DEVICE,
     debug: bool = False,
-) -> float | torch.Tensor:
+) -> Tuple[float, float | torch.Tensor, float]:
     """
     Evaluate a single batch of tensors, and return the average triplet accuracy of the batch
     """
@@ -71,16 +80,22 @@ def evaluate_batch(
             positive_embeddings,
             anchor_embeddings,
             mine_strategy=mine_strategy,
-            margin=alpha,
+            margin=margin,
         )
 
-        res = triplet_accuracy(
+        accuracy = triplet_accuracy(
             anchor=anchor_embeddings,
             positive=positive_embeddings,
             negative=negative_embeddings,
-            margin=alpha,
+            margin=margin,
             debug=debug,
         )
+
+        topk_accuracy = topk_triplet_accuracy(anchor_embeddings, positive_embeddings)
+
+        loss = loss_fn(
+            anchor_embeddings, positive_embeddings, negative_embeddings
+        ).item()
         if debug:
-            print(f"Result shape: {res.shape}")  # type: ignore
-        return res
+            print(f"Result shape: {accuracy.shape}")  # type: ignore
+        return loss, accuracy, topk_accuracy
