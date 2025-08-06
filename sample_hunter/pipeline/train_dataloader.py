@@ -47,16 +47,7 @@ class TrainDataloaderBuffer:
 
         print("all data moved to cpu")
 
-        self.gpu_thread = threading.Thread(target=self._gpu_prefetcher)
-
         self.stop = False
-
-    def __enter__(self):
-        self.gpu_thread.start()
-        return self
-
-    def __exit__(self, *exc):
-        self.gpu_thread.join()
 
     def __iter__(self):
         while True:
@@ -64,21 +55,24 @@ class TrainDataloaderBuffer:
             if sub_batch is None:
                 break
             yield sub_batch
-            time.sleep(0.05)
 
-    def _gpu_prefetcher(self):
-        """fetch a sub batch from the cpu if necessary"""
-        while not self.cpu_queue.empty():
-            if self.gpu_queue.qsize() < self.buffersize:
-                sub_batch = self.cpu_queue.get()
+            if not self.cpu_queue.empty():
+                new_sub_batch = self.cpu_queue.get()
+                self.gpu_queue.put(tuple(t.to("cuda") for t in new_sub_batch))
 
-                # move the sub batch to cuda and schedule it by enqueueing
-                sub_batch = tuple(t.to("cuda") for t in sub_batch)
-                self.gpu_queue.put(sub_batch)
+    # def _gpu_prefetcher(self):
+    #     """fetch a sub batch from the cpu if necessary"""
+    #     while not self.cpu_queue.empty():
+    #         if self.gpu_queue.qsize() < self.buffersize:
+    #             sub_batch = self.cpu_queue.get()
 
-            time.sleep(0.1)
-        # when we get here, it means there are no batches left
-        self.gpu_queue.put(None)
+    #             # move the sub batch to cuda and schedule it by enqueueing
+    #             sub_batch = tuple(t.to("cuda") for t in sub_batch)
+    #             self.gpu_queue.put(sub_batch)
+
+    #         time.sleep(0.1)
+    #     # when we get here, it means there are no batches left
+    #     self.gpu_queue.put(None)
 
 
 class TrainDataloader:
@@ -199,8 +193,8 @@ class TrainDataloader:
             print(sub_batches[0][1].dtype)
             print(sub_batches[0][2].dtype)
 
-        with TrainDataloaderBuffer(sub_batches) as buffer:  # type: ignore
-            yield from buffer
+        buffer = TrainDataloaderBuffer(sub_batches)  # type: ignore
+        yield from buffer
 
     def _preprocess_example(self, dataset_iter, preprocessor: Preprocessor):
         with torch.no_grad():
