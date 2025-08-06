@@ -5,7 +5,11 @@ Triplet loss functions to be used in training and evaluation
 import warnings
 import torch
 
-from sample_hunter.config import DEFAULT_MINE_STRATEGY, DEFAULT_TRIPLET_LOSS_MARGIN
+from sample_hunter.config import (
+    DEFAULT_MINE_STRATEGY,
+    DEFAULT_TRIPLET_LOSS_MARGIN,
+    DEFAULT_TOP_K,
+)
 
 
 def triplet_accuracy(
@@ -16,7 +20,7 @@ def triplet_accuracy(
     debug: bool = False,
 ) -> float | torch.Tensor:
     """
-    Calculates the accuracy of the model by returning the ratio of positive embeddings
+    Calculates the accuracy of the embeddings by returning the ratio of positive embeddings
     closer to the anchor than negative ones. The positive embedding must be at least `alpha` closer
     to the anchor than the negative embedding
 
@@ -30,6 +34,26 @@ def triplet_accuracy(
         return correct
     else:
         return correct.float().mean().item()
+
+
+def topk_triplet_accuracy(
+    anchor: torch.Tensor, positive: torch.Tensor, top_k: int = DEFAULT_TOP_K
+) -> float:
+    """
+    Calculates the accuracy of the embeddings by returning the ratio of positive embeddings that are in the
+    'top k' nearest neighbors of the anchor embeddings.
+    """
+
+    dists = torch.cdist(anchor, positive, p=2)  # (B, B)
+
+    nearest_neighbors = torch.topk(dists, top_k, dim=1, largest=False).indices  # (B, k)
+
+    labels = torch.arange(0, anchor.shape[0], 1)  # these are the correct indices
+    labels = labels.unsqueeze(1)  # (B, 1)
+
+    correct = (labels == nearest_neighbors).any(dim=1)  # (B,)
+
+    return correct.float().mean().item()
 
 
 def mine_negative(
