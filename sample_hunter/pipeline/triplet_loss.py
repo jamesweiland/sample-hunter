@@ -48,7 +48,9 @@ def topk_triplet_accuracy(
 
     nearest_neighbors = torch.topk(dists, top_k, dim=1, largest=False).indices  # (B, k)
 
-    labels = torch.arange(0, anchor.shape[0], 1)  # these are the correct indices
+    labels = torch.arange(
+        0, anchor.shape[0], 1, device=anchor.device
+    )  # these are the correct indices
     labels = labels.unsqueeze(1)  # (B, 1)
 
     correct = (labels == nearest_neighbors).any(dim=1)  # (B,)
