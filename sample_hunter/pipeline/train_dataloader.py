@@ -203,7 +203,6 @@ class TrainDataloader:
             yield from buffer
 
     def _preprocess_example(self, dataset_iter, preprocessor: Preprocessor):
-        print("preprocessing example")
         with torch.no_grad():
             example = None
             try:
@@ -215,7 +214,6 @@ class TrainDataloader:
                     sample_rate=example["json"]["sample_rate"],
                     train=True,
                 )
-                print("preprocessing done")
                 return {
                     "positive": positive,
                     "anchor": anchor,
