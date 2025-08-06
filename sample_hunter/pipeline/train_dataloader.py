@@ -111,6 +111,10 @@ class TrainDataloader:
             try:
                 batch = self._preprocess_batch(dataset_iter)
 
+                if len(batch) == 0:
+                    # dataset is exhausted
+                    break
+
                 yield from self._collate(batch)
 
             except Exception:
