@@ -6,8 +6,15 @@ Config used for most recent preprocessing: preprocess_8_6_2025.yaml
 """
 
 import argparse
+import tarfile
+import time
+import threading
+import queue
 import webdataset as wds
 
+from huggingface_hub import HfApi
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from uuid import uuid4
 from pathlib import Path
 
 from sample_hunter.pipeline.data_loading import load_webdataset
@@ -17,12 +24,50 @@ from sample_hunter._util import HF_TOKEN, DEVICE
 DEFAULT_SHARD_SIZE: int = int(1e9)
 
 
+def _fetch_tar_and_upload(
+    q: queue.Queue, target_repo: str, split: str, token: str, max_retries: int = 3
+):
+    api = HfApi(token=token)
+
+    retry_count = 0
+    while True:
+        try:
+            shard = q.get(timeout=60)
+
+            if shard is None:
+                break
+
+            path_in_repo = f"{split}/{str(uuid4())}.tar"
+
+            api.upload_file(
+                path_or_fileobj=shard,
+                repo_id=target_repo,
+                repo_type="dataset",
+                path_in_repo=path_in_repo,
+            )
+
+            retry_count = 0
+        except queue.Empty:
+            if retry_count >= max_retries:
+                print("Max retries exceeded waiting for tarfile")
+                raise
+
+            print(
+                "Fetcher timed out waiting for a shard. Waiting 1 minute then retrying..."
+            )
+            retry_count += 1
+            time.sleep(60)
+
+        except Exception:
+            raise
+
+
 def upload_split(
     split: wds.WebDataset,
     split_name: str,
     preprocess_config: PreprocessConfig,
     obfuscator_config: ObfuscatorConfig,
-    repo_id: str,
+    target_repo: str,
     token: str,
     procs: int | None = None,
     threads: int | None = None,
@@ -34,10 +79,42 @@ def upload_split(
     """
 
     if device == "cpu":
+        assert procs is not None
         # use multiprocessing to preprocess songs in parallel
 
         # a single thread on the main process will periodically check a queue for preprocessed songs and add
         # them to a tar shard, and if the shard's size > shard_size, upload the shard to HF and start a new one
+
+        q = queue.Queue()
+        tar = None
+        archive_size = 0
+
+        uploader = threading.Thread(
+            target=_fetch_tar_and_upload, args=(q, target_repo, split_name, token)
+        )
+        uploader.start()
+
+        with ProcessPoolExecutor(max_workers=procs) as executor:
+            futures = []
+
+            for future in as_completed(futures):
+                result = future.result()
+
+                result_size = (
+                    len(result["anchor"])
+                    + len(result["positive"])
+                    + len(result["json"])
+                )
+
+                if tar is None or (archive_size + result_size) > shard_size:
+                    if tar is not None:
+                        q.put(tar)
+
+                    
+
+        # sentinel to end uploader
+        q.put(None)
+        q.join()
 
 
 def parse_args() -> argparse.Namespace:
