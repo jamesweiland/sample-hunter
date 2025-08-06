@@ -20,9 +20,6 @@ from sample_hunter._util import HF_TOKEN, DEVICE
 from sample_hunter.config import DEFAULT_CACHE_DIR
 
 
-
-
-
 def load_tensor_from_bytes(
     initial_bytes: Buffer, device: str = DEVICE
 ) -> Tuple[torch.Tensor, int]:
