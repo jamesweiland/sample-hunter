@@ -67,6 +67,17 @@ class BatchedTimeStretchPerturbation:
         else:
             raise ValueError(f"Unsupported device: {device}")
 
+        # set up the stretchers
+        if self.device == "cuda" or self.num_workers <= 1:
+            self.stretchers = [
+                torchaudio.transforms.TimeStretch(
+                    hop_length=self.hop_length,
+                    fixed_rate=factor,
+                    n_freq=self.hop_length + 1,
+                ).to(self.device)
+                for factor in self.factors
+            ]
+
     def __enter__(self):
         """Set up the proper resources"""
         self._pool = None
@@ -86,21 +97,10 @@ class BatchedTimeStretchPerturbation:
                     threads_per_worker,
                 ],
             )
-        else:
-            self.stretchers = [
-                torchaudio.transforms.TimeStretch(
-                    hop_length=self.hop_length,
-                    fixed_rate=factor,
-                    n_freq=self.hop_length + 1,
-                ).to(self.device)
-                for factor in self.factors
+        elif self.device == "cuda" and self.num_workers > 1:
+            self._streams = [
+                torch.cuda.Stream(device=self.device) for _ in range(self.num_workers)
             ]
-
-            if self.device == "cuda" and self.num_workers > 1:
-                self._streams = [
-                    torch.cuda.Stream(device=self.device)
-                    for _ in range(self.num_workers)
-                ]
 
         return self
 

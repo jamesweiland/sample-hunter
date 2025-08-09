@@ -47,9 +47,20 @@ class BatchedPitchPerturbation:
             self.device = device
         else:
             raise ValueError(f"Unsupported device: {device}")
-        # set up cuda streams
+
         self.num_workers = min(len(self.factors), num_workers)
         self.sample_rate = sample_rate
+
+        # set up the shifters
+        if self.device == "cuda" or self.num_workers <= 1:
+            self.shifters = [
+                torchaudio.transforms.PitchShift(
+                    sample_rate=self.sample_rate,
+                    n_steps=factor.numerator,
+                    bins_per_octave=factor.denominator,
+                ).to(self.device)
+                for factor in self.factors
+            ]
 
     def __enter__(self):
         """Initialize the proper resources"""
@@ -69,21 +80,10 @@ class BatchedPitchPerturbation:
                         threads_per_worker,
                     ],
                 )
-        else:
-            self.shifters = [
-                torchaudio.transforms.PitchShift(
-                    sample_rate=self.sample_rate,
-                    n_steps=factor.numerator,
-                    bins_per_octave=factor.denominator,
-                ).to(self.device)
-                for factor in self.factors
+        elif self.device == "cuda" and self.num_workers > 1:
+            self._streams = [
+                torch.cuda.Stream(device=self.device) for _ in range(self.num_workers)
             ]
-
-            if self.device == "cuda" and self.num_workers > 1:
-                self._streams = [
-                    torch.cuda.Stream(device=self.device)
-                    for _ in range(self.num_workers)
-                ]
 
         return self
 
