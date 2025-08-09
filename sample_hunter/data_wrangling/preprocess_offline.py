@@ -228,8 +228,6 @@ def upload_split(
     else:
         n = 16
 
-    archive_size = 0
-
     uploader = threading.Thread(
         target=_fetch_tar_and_upload,
         args=(tar_result_queue, target_repo, split_name, token),
