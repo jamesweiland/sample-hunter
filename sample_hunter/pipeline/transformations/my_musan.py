@@ -14,6 +14,17 @@ class MusanException(BaseException):
     pass
 
 
+_LOCKS = None
+_MANAGER = None
+
+
+def set_global_locks(locks_dict, manager):
+    global _LOCKS
+    global _MANAGER
+    _LOCKS = locks_dict
+    _MANAGER = manager
+
+
 class MyMusan(torch.utils.data.Dataset):
     """A wrapper around torchaudio.prototype.datasets.Musan to do some extra preprocessing before yielding samples"""
 
@@ -46,7 +57,29 @@ class MyMusan(torch.utils.data.Dataset):
         return len(self.musan)
 
     def __getitem__(self, n):
-        signal, sr, name = self.musan[n]
+
+        if _LOCKS is None or _MANAGER is None:
+            # fall back to single process reading
+            signal, sr, name = self.musan[n]
+
+        else:
+            # ensure a lock exists for this name
+            lock = _LOCKS.get(n)
+            if lock is None:
+                # create a new lock for this idx using the shared global manager
+                lock = _MANAGER.Lock()
+
+                # use setdefault in case a different process set this concurrently
+                existing_lock = _LOCKS.setdefault(n, lock)
+                if existing_lock != lock:
+                    lock = existing_lock
+
+            # now, we can safely read the file
+            with lock:
+                try:
+                    signal, sr, name = self.musan[n]
+                except Exception as e:
+                    raise MusanException(f"Failed to access Musan item {n} data: {e}")
 
         if signal.ndim != 2:
             raise MusanException(

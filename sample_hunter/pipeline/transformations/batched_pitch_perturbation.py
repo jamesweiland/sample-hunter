@@ -50,22 +50,25 @@ class BatchedPitchPerturbation:
         # set up cuda streams
         self.num_workers = min(len(self.factors), num_workers)
         self.sample_rate = sample_rate
-        self.threads_per_worker = PROCS // self.num_workers
 
     def __enter__(self):
         """Initialize the proper resources"""
-        if self.device == "cpu":
-            ctx = mp.get_context("spawn")
-            self._pool = ctx.Pool(
-                processes=self.num_workers,
-                initializer=_init_worker,
-                initargs=[
-                    _worker_func,
-                    self.factors,
-                    self.sample_rate,
-                    self.threads_per_worker,
-                ],
-            )
+        self._pool = None
+        self._streams = None
+        if self.device == "cpu" and self.num_workers > 1:
+            threads_per_worker = PROCS // self.num_workers
+            if self.num_workers > 1:
+                ctx = mp.get_context("spawn")
+                self._pool = ctx.Pool(
+                    processes=self.num_workers,
+                    initializer=_init_worker,
+                    initargs=[
+                        _worker_func,
+                        self.factors,
+                        self.sample_rate,
+                        threads_per_worker,
+                    ],
+                )
         else:
             self.shifters = [
                 torchaudio.transforms.PitchShift(
@@ -75,9 +78,13 @@ class BatchedPitchPerturbation:
                 ).to(self.device)
                 for factor in self.factors
             ]
-            self._streams = [
-                torch.cuda.Stream(device=self.device) for _ in range(self.num_workers)
-            ]
+
+            if self.device == "cuda":
+                self._streams = [
+                    torch.cuda.Stream(device=self.device)
+                    for _ in range(self.num_workers)
+                ]
+
         return self
 
     def __exit__(self, *exc):

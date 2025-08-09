@@ -126,6 +126,7 @@ class ObfuscatorConfig(YAMLConfig):
     spec_num_sec: float = DEFAULT_SPEC_NUM_SEC
     step_num_sec: float = DEFAULT_STEP_NUM_SEC
     volume_threshold: int = DEFAULT_VOLUME_THRESHOLD
+    perturb_num_workers: int = 1
 
     @property
     def offset_span_num_samples(self) -> int:
