@@ -22,7 +22,7 @@ DEFAULT_TOP_K: int = 20
 DEFAULT_VOLUME_THRESHOLD: int = -60  # dbfs, remove anything below this
 
 DEFAULT_DATASET_REPO: str = "samplr/songs"
-DEFAULT_CACHE_DIR: Path = Path("/home/james/code/sample-hunter/_data/cache")
+DEFAULT_CACHE_DIR: Path = Path("/content/drive/MyDrive/sample-hunter/cache")
 
 T = TypeVar("T", bound="YAMLConfig")
 

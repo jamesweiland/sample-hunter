@@ -18,4 +18,4 @@ musan_noise_range: [-5, 5]
 offset_span: 0.05
 lowpass_frac: 0.5
 perturb_num_workers: 1
-musan: "/home/james/code/sample-hunter/_data/musan"
+musan: "/content/drive/MyDrive/sample-hunter/musan"
