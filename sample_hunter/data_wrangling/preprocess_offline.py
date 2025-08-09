@@ -136,6 +136,7 @@ def add_future_result_to_tar(
 ):
     try:
         result = future.result()
+        print("new result")
     except Exception:
         print("an exception occured trying to access the result of a future")
         traceback.print_exc()
@@ -415,6 +416,17 @@ if __name__ == "__main__":
     upload_split(
         split=train_split,
         split_name="train",
+        preprocess_config=preprocess_config,
+        obfuscator_config=obfuscator_config,
+        target_repo=args.target,
+        token=args.token,
+        procs=args.procs,
+        threads=args.threads,
+        shard_size=args.shardsize,
+    )
+    upload_split(
+        split=test_split,
+        split_name="test",
         preprocess_config=preprocess_config,
         obfuscator_config=obfuscator_config,
         target_repo=args.target,
