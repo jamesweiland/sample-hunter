@@ -22,7 +22,7 @@ import torch.multiprocessing as mp
 
 from huggingface_hub import HfApi
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 from uuid import uuid4
 from pathlib import Path
 
