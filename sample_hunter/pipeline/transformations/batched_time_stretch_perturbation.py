@@ -96,7 +96,7 @@ class BatchedTimeStretchPerturbation:
                 for factor in self.factors
             ]
 
-            if self.device == "cuda":
+            if self.device == "cuda" and self.num_workers > 1:
                 self._streams = [
                     torch.cuda.Stream(device=self.device)
                     for _ in range(self.num_workers)
@@ -135,48 +135,45 @@ class BatchedTimeStretchPerturbation:
             for i in range(len(self.factors))
         ]
 
-        if self.device == "cuda":
-            if self._streams is None:
-                raise RuntimeError(
-                    "BatchedTimeStretchPerturbation must be used within context manager for CUDA"
-                )
-            for i, mask, sub_batch, ori_size in stretcher_tasks:
-                # skip empty sub batches, which can happen due to randomness
-                if sub_batch.numel() == 0:
-                    continue
-
-                with torch.cuda.Stream(self._streams[i]):
-                    ob[mask] = resize(
-                        torch.istft(
-                            self.stretchers[i](sub_batch),
-                            n_fft=self.n_fft,
-                            hop_length=self.hop_length,
-                            window=self.window,
-                        ),
-                        ori_size,
-                    ).unsqueeze(1)
-            for i, _, _, _ in stretcher_tasks:
-                self._streams[i].synchronize()
-
-        elif self.device == "cpu":
-            if self._pool:
-                results = self._pool.starmap(_worker_func, stretcher_tasks)
-                for result, mask in results:
-                    ob[mask] = result
-            else:
+        if self.device == "cuda" and self._streams:
+            if self._streams is not None:
                 for i, mask, sub_batch, ori_size in stretcher_tasks:
                     # skip empty sub batches, which can happen due to randomness
                     if sub_batch.numel() == 0:
                         continue
 
-                    ob[mask] = resize(
-                        torch.istft(
-                            self.stretchers[i](sub_batch),
-                            n_fft=self.n_fft,
-                            hop_length=self.hop_length,
-                            window=self.window,
-                        ),
-                        ori_size,
-                    ).unsqueeze(1)
+                    with torch.cuda.Stream(self._streams[i]):
+                        ob[mask] = resize(
+                            torch.istft(
+                                self.stretchers[i](sub_batch),
+                                n_fft=self.n_fft,
+                                hop_length=self.hop_length,
+                                window=self.window,
+                            ),
+                            ori_size,
+                        ).unsqueeze(1)
+                for i, _, _, _ in stretcher_tasks:
+                    self._streams[i].synchronize()
+
+        elif self.device == "cpu" and self._pool:
+            if self._pool:
+                results = self._pool.starmap(_worker_func, stretcher_tasks)
+                for result, mask in results:
+                    ob[mask] = result
+        else:
+            for i, mask, sub_batch, ori_size in stretcher_tasks:
+                # skip empty sub batches, which can happen due to randomness
+                if sub_batch.numel() == 0:
+                    continue
+
+                ob[mask] = resize(
+                    torch.istft(
+                        self.stretchers[i](sub_batch),
+                        n_fft=self.n_fft,
+                        hop_length=self.hop_length,
+                        window=self.window,
+                    ),
+                    ori_size,
+                ).unsqueeze(1)
 
         return ob

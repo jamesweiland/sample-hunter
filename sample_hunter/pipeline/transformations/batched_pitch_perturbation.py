@@ -79,7 +79,7 @@ class BatchedPitchPerturbation:
                 for factor in self.factors
             ]
 
-            if self.device == "cuda":
+            if self.device == "cuda" and self.num_workers > 1:
                 self._streams = [
                     torch.cuda.Stream(device=self.device)
                     for _ in range(self.num_workers)
@@ -111,11 +111,7 @@ class BatchedPitchPerturbation:
             for i in range(len(self.factors))
         ]
 
-        if self.device == "cuda":
-            if self._streams is None:
-                raise RuntimeError(
-                    "BatchedPitchPerturbation must be used within context manager for CUDA"
-                )
+        if self.device == "cuda" and self._streams:
             for i, mask, sub_batch in shifter_tasks:
                 # skip empty sub_batches, which can happen because of randomness
                 if sub_batch.numel() == 0:
@@ -126,17 +122,17 @@ class BatchedPitchPerturbation:
             for i, _, _ in shifter_tasks:
                 self._streams[i].synchronize()
 
-        elif self.device == "cpu":
+        elif self.device == "cpu" and self._pool:
             if self._pool:
                 results = self._pool.starmap(_worker_func, shifter_tasks)
                 for result, mask in results:
                     ob[mask] = result
-            else:
-                for i, mask, sub_batch in shifter_tasks:
-                    # skip empty sub_batches, which can happen because of randomness
-                    if sub_batch.numel() == 0:
-                        continue
+        else:
+            for i, mask, sub_batch in shifter_tasks:
+                # skip empty sub_batches, which can happen because of randomness
+                if sub_batch.numel() == 0:
+                    continue
 
-                    ob[mask] = self.shifters[i](sub_batch)
+                ob[mask] = self.shifters[i](sub_batch)
 
         return ob
