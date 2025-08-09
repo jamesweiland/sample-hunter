@@ -7,7 +7,7 @@ Config used for most recent preprocessing: preprocess_8_6_2025.yaml
 
 import itertools
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, List
 import torch
 import argparse
 import io
@@ -135,46 +135,49 @@ def add_future_result_to_tar(
     shard_size: int,
 ):
     try:
-        result = future.result()
+        results = future.result()
         print("new result")
     except Exception:
         print("an exception occured trying to access the result of a future")
         traceback.print_exc()
         raise
 
-    anchor, positive, metadata = result["anchor"], result["positive"], result["json"]
-    anchor = anchor.to("cpu")
-    positive = positive.to("cpu")
+    for result in results:
+        anchor, positive, metadata = (
+            result["anchor"],
+            result["positive"],
+            result["json"],
+        )
+        anchor = anchor.to("cpu")
+        positive = positive.to("cpu")
+        result_size = anchor.nbytes + positive.nbytes + sys.getsizeof(metadata)
 
-    result_size = anchor.nbytes + positive.nbytes + len(metadata)
+        if tar is None or (archive_size + result_size) > shard_size:
+            if tar is not None:
+                assert tar_buf is not None
 
-    metadata = json.loads(metadata.decode("utf-8"))
+                tar.close()
+                tar_buf.seek(0)
+                tar_result_queue.put(tar_buf)
+                archive_size = 0
 
-    if tar is None or (archive_size + result_size) > shard_size:
-        if tar is not None:
-            assert tar_buf is not None
+            tar_buf = io.BytesIO()
+            tar = tarfile.open(fileobj=tar_buf, mode="w")
 
-            tar.close()
-            tar_buf.seek(0)
-            tar_result_queue.put(tar_buf)
-            archive_size = 0
+        example_id = metadata["id"]
+        anchor_name = f"{example_id}.anchor.tar"
+        positive_name = f"{example_id}.positive.tar"
+        json_name = f"{example_id}.json"
 
-        tar_buf = io.BytesIO()
-        tar = tarfile.open(fileobj=tar_buf, mode="w")
+        # add tensors to tar
+        archive_size += write_tensor_to_tar(tar, anchor, anchor_name)
+        archive_size += write_tensor_to_tar(tar, positive, positive_name)
+        archive_size += write_json_to_tar(tar, metadata, json_name)
 
-    example_id = metadata["example_id"]
-    anchor_name = f"{example_id}.anchor.tar"
-    positive_name = f"{example_id}.positive.tar"
-    json_name = f"{example_id}.json"
-
-    # add tensors to tar
-    archive_size += write_tensor_to_tar(tar, anchor, anchor_name)
-    archive_size += write_tensor_to_tar(tar, positive, positive_name)
-    archive_size += write_json_to_tar(tar, metadata, json_name)
     return tar, tar_buf, archive_size
 
 
-def preprocess(example: Dict[str, Any]) -> Dict[str, Any]:
+def preprocess(example: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Preprocess the example into a preprocessed result with keys 'anchor', 'positive', and 'json'
     """
@@ -183,7 +186,9 @@ def preprocess(example: Dict[str, Any]) -> Dict[str, Any]:
             with preprocess.preprocessor as preprocessor:  # type: ignore
                 audio, sr = load_tensor_from_bytes(example["mp3"], preprocess.device)  # type: ignore
 
-                positive, anchor = preprocessor(audio, sample_rate=sr, train=True)
+                positive_batch, anchor_batch = preprocessor(
+                    audio, sample_rate=sr, train=True
+                )
 
                 # create metadata file and encode to bytes
                 metadata = {
@@ -192,7 +197,16 @@ def preprocess(example: Dict[str, Any]) -> Dict[str, Any]:
                 }
                 metadata = json.dumps(metadata).encode("utf-8")
 
-            return {"anchor": anchor, "positive": positive, "json": metadata}
+                result = [
+                    {
+                        "anchor": anchor_batch[i],
+                        "positive": positive_batch[i],
+                        "json": {"song_id": example["json"]["id"], "id": str(uuid4())},
+                    }
+                    for i in range(anchor_batch.shape[0])
+                ]
+
+            return result
     except Exception:
         print("an error occured trying to preprocess a song")
         traceback.print_exc(file=sys.stderr)
