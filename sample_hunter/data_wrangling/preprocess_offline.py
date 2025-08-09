@@ -147,6 +147,8 @@ def add_future_result_to_tar(
 
     result_size = anchor.nbytes + positive.nbytes + len(metadata)
 
+    metadata = json.loads(metadata.decode("utf-8"))
+
     if tar is None or (archive_size + result_size) > shard_size:
         if tar is not None:
             assert tar_buf is not None
