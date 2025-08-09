@@ -61,7 +61,7 @@ class Obfuscator:
     def time_stretch_perturbation(self) -> BatchedTimeStretchPerturbation:
         return BatchedTimeStretchPerturbation(
             factors=self.config.time_stretch_factors,
-            num_workers=len(self.config.time_stretch_factors),
+            num_workers=self.config.perturb_num_workers,
             device=self.device,
         )
 
@@ -71,7 +71,7 @@ class Obfuscator:
             sample_rate=self.config.sample_rate,
             factors=self.config.pitch_factors,
             device=self.device,
-            num_workers=len(self.config.pitch_factors),
+            num_workers=self.config.perturb_num_workers,
         )
 
     def __enter__(self):

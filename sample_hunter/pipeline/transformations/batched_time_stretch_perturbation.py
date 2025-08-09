@@ -61,7 +61,6 @@ class BatchedTimeStretchPerturbation:
         self.factors = factors
 
         self.num_workers = min(num_workers, len(factors))
-        self.threads_per_worker = PROCS // self.num_workers
 
         if device == "cpu" or device == "cuda":
             self.device = device
@@ -70,7 +69,10 @@ class BatchedTimeStretchPerturbation:
 
     def __enter__(self):
         """Set up the proper resources"""
-        if self.device == "cpu":
+        self._pool = None
+        self._streams = None
+        if self.device == "cpu" and self.num_workers > 1:
+            threads_per_worker = PROCS // self.num_workers
             ctx = mp.get_context("spawn")
             self._pool = ctx.Pool(
                 processes=self.num_workers,
@@ -81,7 +83,7 @@ class BatchedTimeStretchPerturbation:
                     self.n_fft,
                     self.hop_length,
                     self.window,
-                    self.threads_per_worker,
+                    threads_per_worker,
                 ],
             )
         else:
@@ -93,9 +95,13 @@ class BatchedTimeStretchPerturbation:
                 ).to(self.device)
                 for factor in self.factors
             ]
-            self._streams = [
-                torch.cuda.Stream(device=self.device) for _ in range(self.num_workers)
-            ]
+
+            if self.device == "cuda":
+                self._streams = [
+                    torch.cuda.Stream(device=self.device)
+                    for _ in range(self.num_workers)
+                ]
+
         return self
 
     def __exit__(self, *exc):
