@@ -37,6 +37,7 @@ DEFAULT_SHARD_SIZE: int = int(1e9)
 DEFAULT_PROCS: int = 8
 DEFAULT_THREADS: int = 10
 song_num = 1
+lock = threading.Lock()
 
 
 def _fetch_tar_and_upload(q: queue.Queue, target_repo: str, split: str, token: str):
@@ -138,8 +139,10 @@ def add_future_result_to_tar(
     try:
         results = future.result()
         global song_num
-        print(f"song {song_num}")
-        song_num += 1
+        global lock
+        with lock:
+            print(f"song {song_num}")
+            song_num += 1
     except Exception:
         print("an exception occured trying to access the result of a future")
         traceback.print_exc()
