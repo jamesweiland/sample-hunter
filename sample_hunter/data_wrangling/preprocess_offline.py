@@ -242,6 +242,7 @@ def upload_split(
     tar = None
     tar_buf = None
     archive_size = 0
+    split_iter = iter(split)
     if procs is not None:
         n = max(2 * procs, 16)  # size of task chunks to hold in memory at once
     elif threads is not None:
@@ -282,7 +283,7 @@ def upload_split(
                 # schedule the first n futures
                 futures = {
                     executor.submit(preprocess, task)
-                    for task in itertools.islice(split, n)
+                    for task in itertools.islice(split_iter, n)
                 }
 
                 while futures:
@@ -302,7 +303,7 @@ def upload_split(
                         pbar.update(1)
 
                     # schedule the next set of futures
-                    for task in itertools.islice(split, len(done)):
+                    for task in itertools.islice(split_iter, len(done)):
                         futures.add(executor.submit(preprocess, task))
 
         elif device == "cuda":
@@ -316,7 +317,7 @@ def upload_split(
 
                 futures = {
                     executor.submit(preprocess, task)
-                    for task in itertools.islice(split, n)
+                    for task in itertools.islice(split_iter, n)
                 }
 
                 while futures:
@@ -336,7 +337,7 @@ def upload_split(
                         pbar.update(1)
 
                     # schedule the next set of futures
-                    for task in itertools.islice(split, len(done)):
+                    for task in itertools.islice(split_iter, len(done)):
                         futures.add(executor.submit(preprocess, task))
 
         else:
