@@ -7,7 +7,6 @@ import argparse
 from pathlib import Path
 import webdataset as wds
 
-from .train_dataloader import TrainDataloader
 from .data_loading import load_webdataset
 from .encoder_net import EncoderNet
 from .triplet_loss import topk_triplet_accuracy, triplet_accuracy, mine_negative
@@ -28,7 +27,7 @@ from sample_hunter._util import (
 
 def train_single_epoch(
     model: nn.Module,
-    dataloader: TrainDataloader,
+    dataloader: torch.utils.data.DataLoader,
     loss_fn: Callable[..., Tensor],
     mine_strategy: str,
     optimizer: torch.optim.Optimizer,
@@ -101,7 +100,7 @@ def train_single_epoch(
 
 def train(
     model: nn.Module,
-    train_dataloader: TrainDataloader,
+    train_dataloader: torch.utils.data.DataLoader,
     loss_fn: Callable,
     mine_strategy: str,
     optimizer: torch.optim.Optimizer,
@@ -109,7 +108,7 @@ def train(
     triplet_loss_margin: float,
     tensorboard: str = "none",
     log_dir: Path | None = None,
-    test_dataloader: TrainDataloader | None = None,
+    test_dataloader: torch.utils.data.DataLoader | None = None,
     save_per_epoch: Path | None = None,
     device: str = DEVICE,
 ):
@@ -296,24 +295,20 @@ if __name__ == "__main__":
             ),
         )
 
-    train_dataloader = TrainDataloader(
-        dataset=train_dataset,
-        config=train_config,
-        preprocess_config=preprocess_config,
-        obfuscator_config=obfuscator_config,
-        device=DEVICE,
-    )
-
-    test_dataloader = TrainDataloader(
-        dataset=test_dataset,
-        config=train_config,
-        preprocess_config=preprocess_config,
-        obfuscator_config=obfuscator_config,
-        device=DEVICE,
-    )
-
     if args.num:
         train_dataset = train_dataset.slice(args.num)
+
+    for ex in train_dataset:
+        print(ex.keys())
+        exit(0)
+
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=train_config.batch_size
+    )
+
+    test_dataloader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=train_config.batch_size
+    )
 
     if args.continue_:
         if not args.from_:
