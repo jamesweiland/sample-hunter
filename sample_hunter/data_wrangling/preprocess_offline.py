@@ -171,8 +171,8 @@ def add_future_result_to_tar(
             tar = tarfile.open(fileobj=tar_buf, mode="w")
 
         example_id = metadata["id"]
-        anchor_name = f"{example_id}.anchor.tar"
-        positive_name = f"{example_id}.positive.tar"
+        anchor_name = f"{example_id}.anchor.mp3"
+        positive_name = f"{example_id}.positive.mp3"
         json_name = f"{example_id}.json"
 
         # add tensors to tar
