@@ -4,14 +4,13 @@ from typing import Callable, Literal, Tuple
 
 from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_MINE_STRATEGY
 
-from .train_dataloader import TrainDataloader
 from .triplet_loss import triplet_accuracy, mine_negative, topk_triplet_accuracy
 from sample_hunter._util import DEVICE
 
 
 def evaluate(
     model: nn.Module,
-    dataloader: TrainDataloader,
+    dataloader: torch.utils.data.DataLoader,
     margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
     device: str = DEVICE,
 ) -> Tuple[float, float, float]:
