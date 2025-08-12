@@ -412,14 +412,8 @@ if __name__ == "__main__":
         train_tars = [str(tar) for tar in train_dir.glob("*.tar")]
         test_tars = [str(tar) for tar in test_dir.glob("*.tar")]
 
-        train_split = (
-            wds.WebDataset(train_tars, shardshuffle=len(train_tars))
-            .shuffle(200)
-            .decode()
-        )
-        test_split = (
-            wds.WebDataset(test_tars, shardshuffle=len(test_tars)).shuffle(200).decode()
-        )
+        train_split = wds.WebDataset(train_tars, shardshuffle=len(train_tars)).decode()
+        test_split = wds.WebDataset(test_tars, shardshuffle=len(test_tars)).decode()
 
     else:
         d = load_webdataset(args.source, ["train", "test"], args.token)
