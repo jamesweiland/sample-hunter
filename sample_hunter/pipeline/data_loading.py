@@ -112,15 +112,17 @@ def get_tar_files(repo_id: str, split: str, token: str) -> List[str]:
     return tar_files
 
 
+def build_pipe(repo_id: str, tar: str, token: str = HF_TOKEN) -> str:
+    url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{tar}"
+    pipe = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {token}'"
+    return pipe
+
+
 def build_pipes(repo_id: str, split: str, token: str = HF_TOKEN) -> List[str]:
     tar_files = get_tar_files(repo_id, split, token)
-
-    urls = [
-        f"https://huggingface.co/datasets/{repo_id}/resolve/main/{tar}"
-        for tar in tar_files
-    ]
-    pipes = [f"pipe:curl -s -L {url} -H 'Authorization:Bearer {token}'" for url in urls]
-
+    pipes = []
+    for tar in tar_files:
+        pipes.append(build_pipe(repo_id, tar, token))
     return pipes
 
 
