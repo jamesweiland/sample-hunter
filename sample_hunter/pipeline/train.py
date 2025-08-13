@@ -316,9 +316,8 @@ if __name__ == "__main__":
                     cache_dir=train_config.cache_dir,
                 ),
             )
-            .shuffle(1000 * train_config.batch_size)
+            .shuffle(10 * train_config.batch_size)
             .map(train_map_fn)
-            .rsample(1.0)
         )
         test_dataset = (
             cast(
@@ -330,9 +329,8 @@ if __name__ == "__main__":
                     cache_dir=train_config.cache_dir,
                 ),
             )
-            .shuffle(1000 * train_config.batch_size)
+            .shuffle(10 * train_config.batch_size)
             .map(train_map_fn)
-            .rsample(1.0)
         )
 
     if args.num:
