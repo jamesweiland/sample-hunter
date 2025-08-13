@@ -26,7 +26,10 @@ from tqdm import tqdm
 from uuid import uuid4
 from pathlib import Path
 
-from sample_hunter.pipeline.data_loading import load_tensor_from_bytes, load_webdataset
+from sample_hunter.pipeline.data_loading import (
+    load_tensor_from_mp3_bytes,
+    load_webdataset,
+)
 from sample_hunter.config import PreprocessConfig, ObfuscatorConfig
 from sample_hunter._util import HF_TOKEN, DEVICE
 from sample_hunter.pipeline.transformations.my_musan import set_global_locks
@@ -180,7 +183,7 @@ def preprocess(example: Dict[str, Any]) -> Dict[str, Any]:
     try:
         with torch.no_grad():
             with preprocess.preprocessor as preprocessor:  # type: ignore
-                audio, sr = load_tensor_from_bytes(example["mp3"], preprocess.device)  # type: ignore
+                audio, sr = load_tensor_from_mp3_bytes(example["mp3"], preprocess.device)  # type: ignore
 
                 positive, anchor = preprocessor(audio, sample_rate=sr, train=True)
 

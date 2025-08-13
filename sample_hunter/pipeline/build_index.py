@@ -14,7 +14,7 @@ from typing import Tuple, Dict, List, cast
 from .data_loading import (
     collate_spectrograms,
     flatten_sub_batches,
-    load_tensor_from_bytes,
+    load_tensor_from_mp3_bytes,
     load_webdataset,
 )
 from .transformations.preprocessor import Preprocessor
@@ -46,7 +46,7 @@ def build_index(
             if ex["json"]["title"] in song_titles:
                 preprocessor = Preprocessor(obfuscator=None)
                 print(f"good ex {ex["json"]["title"]}")
-                audio, sr = load_tensor_from_bytes(ex["a.mp3"])
+                audio, sr = load_tensor_from_mp3_bytes(ex["a.mp3"])
                 specs = preprocessor(audio, sample_rate=sr, train=False)
                 return {**ex, "specs": specs}
             print(f"bad ex {ex["json"]["title"]}")

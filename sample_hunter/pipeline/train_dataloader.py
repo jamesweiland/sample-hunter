@@ -11,7 +11,7 @@ from typing import List, Tuple
 
 from .transformations.preprocessor import Preprocessor
 from .transformations.obfuscator import Obfuscator
-from .data_loading import collate_spectrograms, load_tensor_from_bytes
+from .data_loading import collate_spectrograms, load_tensor_from_mp3_bytes
 from sample_hunter._util import DEVICE
 from sample_hunter.config import TrainConfig, PreprocessConfig, ObfuscatorConfig
 
@@ -231,6 +231,6 @@ class TrainDataloader:
 
         ex["json"]["sample_rate"] = int(ex["json"]["sample_rate"])
 
-        audio_tensor, sr = load_tensor_from_bytes(ex["mp3"])
+        audio_tensor, sr = load_tensor_from_mp3_bytes(ex["mp3"])
         ex["audio_tensor"] = audio_tensor.to(self.device)
         return ex
