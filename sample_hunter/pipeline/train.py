@@ -1,13 +1,16 @@
+import functools
+import uuid
+import numpy as np
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
-from typing import Callable, Tuple, cast
+from typing import Any, Callable, Dict, List, Tuple, cast
 import argparse
 from pathlib import Path
 import webdataset as wds
 
-from .data_loading import load_webdataset
+from .data_loading import load_tensor_from_pth_bytes, load_webdataset, reshuffle_batches
 from .encoder_net import EncoderNet
 from .triplet_loss import topk_triplet_accuracy, triplet_accuracy, mine_negative
 from .evaluate import evaluate
@@ -199,6 +202,30 @@ def train(
     print("Finished training")
 
 
+def train_map_fn(ex: Dict[str, Any]) -> Dict[str, Any]:
+    ex["anchor"] = load_tensor_from_pth_bytes(ex["anchor.mp3"])
+    ex["positive"] = load_tensor_from_pth_bytes(ex["positive.mp3"])
+    return ex
+
+
+def train_collate_fn(
+    batch: List[Dict[str, Any]],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    anchors = torch.stack([ex["anchor"] for ex in batch])
+    positives = torch.stack([ex["positive"] for ex in batch])
+    print(anchors.shape)
+
+    # have to one-hot encode 128-bit uuids to smaller ints
+    uuids = [uuid.UUID(ex["json"]["song_id"]).int for ex in batch]
+    print(len(uuids))
+    unique_uuids = list(set(uuids))
+    print(len(unique_uuids))
+    uuid_to_int = {u: i for i, u in enumerate(uuids)}
+    keys = torch.tensor([uuid_to_int[u] for u in uuids])
+    print(keys.shape)
+    return anchors, positives, keys
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
@@ -260,6 +287,9 @@ if __name__ == "__main__":
         encoder_net_config = EncoderNetConfig()
 
     # load the datasets, try to get them local first and if not, load from hf
+    shuffler = functools.partial(
+        reshuffle_batches, buffersize=100 * train_config.batch_size
+    )
     if Path(args.dataset).exists():
         # load locally
         dataset_dir = Path(args.dataset)
@@ -276,39 +306,72 @@ if __name__ == "__main__":
 
     else:
         # load from hf
-        train_dataset = cast(
-            wds.WebDataset,
-            load_webdataset(
-                args.dataset,
-                "train",
-                token=args.token,
-                cache_dir=train_config.cache_dir,
-            ),
+        train_dataset = (
+            cast(
+                wds.WebDataset,
+                load_webdataset(
+                    args.dataset,
+                    "train",
+                    token=args.token,
+                    cache_dir=train_config.cache_dir,
+                ),
+            )
+            .shuffle(1000 * train_config.batch_size)
+            .map(train_map_fn)
+            .rsample(1.0)
         )
-        test_dataset = cast(
-            wds.WebDataset,
-            load_webdataset(
-                args.dataset,
-                "test",
-                token=args.token,
-                cache_dir=train_config.cache_dir,
-            ),
+        test_dataset = (
+            cast(
+                wds.WebDataset,
+                load_webdataset(
+                    args.dataset,
+                    "test",
+                    token=args.token,
+                    cache_dir=train_config.cache_dir,
+                ),
+            )
+            .shuffle(1000 * train_config.batch_size)
+            .map(train_map_fn)
+            .rsample(1.0)
         )
 
     if args.num:
         train_dataset = train_dataset.slice(args.num)
 
-    for ex in train_dataset:
-        print(ex.keys())
+    # for ex in train_dataset:
+    #     print(ex.keys())
+    #     print(type(ex["anchor.mp3"]))
+    #     print(type(ex["positive.mp3"]))
+    #     print(type(ex["json"]))
+    #     print(ex["json"].keys())
+
+    #     ex["anchor"] = load_tensor_from_pth_bytes(ex["anchor.mp3"])
+    #     ex["positive"] = load_tensor_from_pth_bytes(ex["positive.mp3"])
+
+    #     print(type(ex["anchor"]))
+    #     print(type(ex["positive"]))
+    #     print(ex["anchor"].shape)
+    #     print(ex["positive"].shape)
+    #     exit(0)
+
+    train_dataloader = wds.WebLoader(
+        train_dataset,
+        batch_size=train_config.batch_size,
+        collate_fn=train_collate_fn,
+    )
+
+    train_dataloader = wds.WebLoader(
+        test_dataset,
+        batch_size=train_config.batch_size,
+        collate_fn=train_collate_fn,
+    )
+
+    for anchor, positive, keys in train_dataloader:
+        print("dataloader worked")
+        print(anchor.shape)
+        print(positive.shape)
+        print(keys.shape)
         exit(0)
-
-    train_dataloader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=train_config.batch_size
-    )
-
-    test_dataloader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=train_config.batch_size
-    )
 
     if args.continue_:
         if not args.from_:

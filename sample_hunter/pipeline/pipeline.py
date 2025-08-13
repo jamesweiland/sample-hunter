@@ -22,7 +22,7 @@ from sample_hunter.config import (
     PostprocessConfig,
 )
 
-from .data_loading import load_tensor_from_bytes, load_webdataset
+from .data_loading import load_tensor_from_mp3_bytes, load_webdataset
 from .encoder_net import EncoderNet
 from .transformations.preprocessor import Preprocessor
 
@@ -129,7 +129,7 @@ class FunkyFinderPipeline(Pipeline):
         transform each of these windows into mel spectrograms
         """
         if isinstance(input_["audio"], bytes):
-            audio, sr = load_tensor_from_bytes(input_["audio"])
+            audio, sr = load_tensor_from_mp3_bytes(input_["audio"])
         elif isinstance(input_["audio"], Path | str):
             audio, sr = torchaudio.load(input_["audio"])
         elif (
@@ -260,8 +260,8 @@ if __name__ == "__main__":
         from sample_hunter._util import play_tensor_audio
         from mutagen.mp3 import MP3
 
-        ground, ground_sr = load_tensor_from_bytes(ex["a.mp3"])
-        positive, positive_sr = load_tensor_from_bytes(ex["b.mp3"])
+        ground, ground_sr = load_tensor_from_mp3_bytes(ex["a.mp3"])
+        positive, positive_sr = load_tensor_from_mp3_bytes(ex["b.mp3"])
 
         play_tensor_audio(ground, message="playing ground...", sample_rate=ground_sr)
         play_tensor_audio(

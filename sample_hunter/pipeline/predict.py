@@ -9,7 +9,7 @@ from pathlib import Path
 from tqdm import tqdm
 import webdataset as wds
 
-from .data_loading import load_tensor_from_bytes, load_webdataset
+from .data_loading import load_tensor_from_mp3_bytes, load_webdataset
 from .transformations.preprocessor import Preprocessor
 from .encoder_net import EncoderNet
 from sample_hunter._util import HF_TOKEN, load_model

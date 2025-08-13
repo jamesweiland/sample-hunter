@@ -6,6 +6,7 @@ from collections.abc import Buffer
 import io
 import math
 from pathlib import Path
+import random
 import torch
 from typing import Dict, List, Tuple, Generator
 from huggingface_hub import HfApi
@@ -20,7 +21,15 @@ from sample_hunter._util import HF_TOKEN, DEVICE
 from sample_hunter.config import DEFAULT_CACHE_DIR
 
 
-def load_tensor_from_bytes(
+def load_tensor_from_pth_bytes(
+    initial_bytes: Buffer, device: str = DEVICE
+) -> torch.Tensor:
+    with io.BytesIO(initial_bytes) as buffer:
+        tensor = torch.load(buffer, map_location=device)
+    return tensor
+
+
+def load_tensor_from_mp3_bytes(
     initial_bytes: Buffer, device: str = DEVICE
 ) -> Tuple[torch.Tensor, int]:
     with io.BytesIO(initial_bytes) as buffer:
@@ -115,6 +124,29 @@ def build_pipes(repo_id: str, split: str, token: str = HF_TOKEN) -> List[str]:
     return pipes
 
 
+def reshuffle_batches(dataset: wds.WebDataset, buffersize: int = 2000):
+    """
+    Collect samples from dataset and reshuffle across a larger buffer.
+
+    Since webdataset only shuffles on the shard level and within the shards
+    themselves, but doesn't allow inter-shard shuffling, this shuffles examples
+    from different shards.
+    """
+
+    buffer = []
+    for example in dataset:
+        buffer.append(example)
+
+        if len(buffer) >= buffersize:
+            random.shuffle(buffer)
+            yield from buffer[: len(buffer) // 2]  # yield half, keep half for mixing
+            buffer = buffer[len(buffer) // 2 :]
+
+    # yield remaining samples
+    random.shuffle(buffer)
+    yield from buffer
+
+
 def load_webdataset(
     repo_id: str,
     split: str | List[str],
@@ -125,20 +157,16 @@ def load_webdataset(
     arbitary 0 padding, for all i found in the split."""
     if isinstance(split, str):
         pipes = build_pipes(repo_id, split, token=token)
-        return (
-            wds.WebDataset(pipes, shardshuffle=100, cache_dir=cache_dir)
-            .shuffle(200)
-            .decode()
-        )
+        return wds.WebDataset(
+            pipes, shardshuffle=len(pipes), cache_dir=cache_dir
+        ).decode()
     else:
         # there are multiple splits, and we'll return a dict of datasets
         datasets = {}
         for s in split:
             pipes = build_pipes(repo_id, s, token=token)
-            dataset = (
-                wds.WebDataset(pipes, shardshuffle=100, cache_dir=cache_dir)
-                .shuffle(200)
-                .decode()
-            )
+            dataset = wds.WebDataset(
+                pipes, shardshuffle=len(pipes), cache_dir=cache_dir
+            ).decode()
             datasets.update({s: dataset})
         return datasets

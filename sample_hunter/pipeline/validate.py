@@ -10,7 +10,7 @@ import webdataset as wds
 from .transformations.functional import resample
 from .evaluate import evaluate_batch
 from .transformations.preprocessor import Preprocessor
-from .data_loading import load_tensor_from_bytes, load_webdataset
+from .data_loading import load_tensor_from_mp3_bytes, load_webdataset
 from sample_hunter.config import (
     DEFAULT_TRIPLET_LOSS_MARGIN,
     DEFAULT_SAMPLE_RATE,
@@ -43,8 +43,8 @@ def validate(
         with Preprocessor() as preprocessor:
 
             def map_fn(ex):
-                anchor, anchor_sr = load_tensor_from_bytes(ex["ground.mp3"])
-                positive, positive_sr = load_tensor_from_bytes(ex["positive.mp3"])
+                anchor, anchor_sr = load_tensor_from_mp3_bytes(ex["ground.mp3"])
+                positive, positive_sr = load_tensor_from_mp3_bytes(ex["positive.mp3"])
 
                 if isinstance(ex["json"], bytes):
                     ex["json"] = json.loads(ex["json"].decode("utf-8"))
@@ -78,8 +78,10 @@ def validate(
 
                 keys = [batch["json"]["ground_id"]] * anchors.shape[0]
 
-                anchor_audio, anchor_sr = load_tensor_from_bytes(batch["positive.mp3"])
-                positive_audio, positive_sr = load_tensor_from_bytes(
+                anchor_audio, anchor_sr = load_tensor_from_mp3_bytes(
+                    batch["positive.mp3"]
+                )
+                positive_audio, positive_sr = load_tensor_from_mp3_bytes(
                     batch["ground.mp3"]
                 )
 
