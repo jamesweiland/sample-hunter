@@ -203,8 +203,8 @@ def train(
 
 
 def train_map_fn(ex: Dict[str, Any]) -> Dict[str, Any]:
-    ex["anchor"] = load_tensor_from_pth_bytes(ex["anchor.mp3"])
-    ex["positive"] = load_tensor_from_pth_bytes(ex["positive.mp3"])
+    ex["anchor"] = load_tensor_from_pth_bytes(ex["anchor.pth"])
+    ex["positive"] = load_tensor_from_pth_bytes(ex["positive.pth"])
     return ex
 
 
@@ -301,8 +301,13 @@ if __name__ == "__main__":
         train_tars = [str(tar) for tar in train_tars]
         test_tars = [str(tar) for tar in test_tars]
 
-        train_dataset = wds.WebDataset(train_tars)
-        test_dataset = wds.WebDataset(test_tars)
+        train_dataset = wds.WebDataset(train_tars).decode()
+        test_dataset = wds.WebDataset(test_tars).decode()
+
+        for ex in train_dataset:
+            print(ex.keys())
+            print(type(ex["positive.pth"]))
+            exit(0)
 
     else:
         # load from hf
