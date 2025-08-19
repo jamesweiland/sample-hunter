@@ -173,13 +173,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--repo-id",
-        type=str,
-        help="The HF repo id to use",
-        default=DEFAULT_DATASET_REPO,
-    )
-
-    parser.add_argument(
         "--token",
         type=str,
         help="Your HF token",
