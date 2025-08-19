@@ -203,12 +203,8 @@ def train(
 def train_collate_fn(
     batch: List[Dict[str, Any]],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    anchors = torch.stack(
-        [ex.get("anchor.pth", ex["anchor.mp3"]) for ex in batch]
-    ).squeeze(1)
-    positives = torch.stack(
-        [ex.get("positive.pth", ex["positive.mp3"]) for ex in batch]
-    ).squeeze(1)
+    anchors = torch.stack([ex["anchor.pth"] for ex in batch]).squeeze(1)
+    positives = torch.stack([ex["positive.pth"] for ex in batch]).squeeze(1)
 
     # have to one-hot encode 128-bit uuids to smaller ints
     uuids = [uuid.UUID(ex["json"]["song_id"][0]) for ex in batch]
