@@ -26,7 +26,10 @@ from tqdm.notebook import tqdm
 from uuid import uuid4
 from pathlib import Path
 
-from sample_hunter.pipeline.data_loading import load_tensor_from_bytes, load_webdataset
+from sample_hunter.pipeline.data_loading import (
+    load_tensor_from_mp3_bytes,
+    load_webdataset,
+)
 from sample_hunter.config import PreprocessConfig, ObfuscatorConfig
 from sample_hunter._util import HF_TOKEN, DEVICE
 from sample_hunter.pipeline.transformations.my_musan import set_global_locks
@@ -170,10 +173,10 @@ def add_future_result_to_tar(
             tar_buf = io.BytesIO()
             tar = tarfile.open(fileobj=tar_buf, mode="w")
 
-        example_id = metadata["id"]
-        anchor_name = f"{example_id}.anchor.mp3"
-        positive_name = f"{example_id}.positive.mp3"
-        json_name = f"{example_id}.json"
+    example_id = metadata["example_id"]
+    anchor_name = f"{example_id}.anchor.pth"
+    positive_name = f"{example_id}.positive.pth"
+    json_name = f"{example_id}.json"
 
         # add tensors to tar
         archive_size += write_tensor_to_tar(tar, anchor, anchor_name)
@@ -190,7 +193,7 @@ def preprocess(example: Dict[str, Any]) -> List[Dict[str, Any]]:
     try:
         with torch.no_grad():
             with preprocess.preprocessor as preprocessor:  # type: ignore
-                audio, sr = load_tensor_from_bytes(example["mp3"], preprocess.device)  # type: ignore
+                audio, sr = load_tensor_from_mp3_bytes(example["mp3"], preprocess.device)  # type: ignore
 
                 positive_batch, anchor_batch = preprocessor(
                     audio, sample_rate=sr, train=True

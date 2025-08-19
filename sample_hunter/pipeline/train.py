@@ -1,13 +1,13 @@
+import uuid
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
-from typing import Callable, Tuple, cast
+from typing import Any, Callable, Dict, List, Tuple, cast
 import argparse
 from pathlib import Path
 import webdataset as wds
 
-from .train_dataloader import TrainDataloader
 from .data_loading import load_webdataset
 from .encoder_net import EncoderNet
 from .triplet_loss import topk_triplet_accuracy, triplet_accuracy, mine_negative
@@ -28,7 +28,7 @@ from sample_hunter._util import (
 
 def train_single_epoch(
     model: nn.Module,
-    dataloader: TrainDataloader,
+    dataloader: torch.utils.data.DataLoader,
     loss_fn: Callable[..., Tensor],
     mine_strategy: str,
     optimizer: torch.optim.Optimizer,
@@ -46,7 +46,6 @@ def train_single_epoch(
     epoch_total_topk_accuracy = 0.0
     epoch_total_loss = 0.0
     for anchor, positive, keys in dataloader:
-        print("starting train iteration")
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
@@ -101,7 +100,7 @@ def train_single_epoch(
 
 def train(
     model: nn.Module,
-    train_dataloader: TrainDataloader,
+    train_dataloader: torch.utils.data.DataLoader,
     loss_fn: Callable,
     mine_strategy: str,
     optimizer: torch.optim.Optimizer,
@@ -109,7 +108,7 @@ def train(
     triplet_loss_margin: float,
     tensorboard: str = "none",
     log_dir: Path | None = None,
-    test_dataloader: TrainDataloader | None = None,
+    test_dataloader: torch.utils.data.DataLoader | None = None,
     save_per_epoch: Path | None = None,
     device: str = DEVICE,
 ):
@@ -200,6 +199,20 @@ def train(
     print("Finished training")
 
 
+def train_collate_fn(
+    batch: List[Dict[str, Any]],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    anchors = torch.stack([ex["anchor.pth"] for ex in batch]).squeeze(1)
+    positives = torch.stack([ex["positive.pth"] for ex in batch]).squeeze(1)
+
+    # have to one-hot encode 128-bit uuids to smaller ints
+    uuids = [uuid.UUID(ex["json"]["song_id"][0]) for ex in batch]
+    unique_uuids = list(set(uuids))
+    uuid_to_int = {u: i for i, u in enumerate(unique_uuids)}
+    keys = torch.tensor([uuid_to_int[u] for u in uuids])
+    return anchors, positives, keys
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
@@ -272,48 +285,48 @@ if __name__ == "__main__":
         train_tars = [str(tar) for tar in train_tars]
         test_tars = [str(tar) for tar in test_tars]
 
-        train_dataset = wds.WebDataset(train_tars)
-        test_dataset = wds.WebDataset(test_tars)
+        train_dataset = wds.WebDataset(train_tars).shuffle(50_000).decode()
+        test_dataset = wds.WebDataset(test_tars).shuffle(50_000).decode()
 
     else:
         # load from hf
-        train_dataset = cast(
-            wds.WebDataset,
-            load_webdataset(
-                args.dataset,
-                "train",
-                token=args.token,
-                cache_dir=train_config.cache_dir,
-            ),
+        train_dataset = (
+            cast(
+                wds.WebDataset,
+                load_webdataset(
+                    args.dataset,
+                    "train",
+                    token=args.token,
+                    cache_dir=train_config.cache_dir,
+                ),
+            )
+            .shuffle(50_000)
+            .decode()
         )
-        test_dataset = cast(
-            wds.WebDataset,
-            load_webdataset(
-                args.dataset,
-                "test",
-                token=args.token,
-                cache_dir=train_config.cache_dir,
-            ),
+        test_dataset = (
+            cast(
+                wds.WebDataset,
+                load_webdataset(
+                    args.dataset,
+                    "test",
+                    token=args.token,
+                    cache_dir=train_config.cache_dir,
+                ),
+            )
+            .shuffle(50_000)
+            .decode()
         )
-
-    train_dataloader = TrainDataloader(
-        dataset=train_dataset,
-        config=train_config,
-        preprocess_config=preprocess_config,
-        obfuscator_config=obfuscator_config,
-        device=DEVICE,
-    )
-
-    test_dataloader = TrainDataloader(
-        dataset=test_dataset,
-        config=train_config,
-        preprocess_config=preprocess_config,
-        obfuscator_config=obfuscator_config,
-        device=DEVICE,
-    )
 
     if args.num:
         train_dataset = train_dataset.slice(args.num)
+
+    train_loader = wds.WebLoader(
+        train_dataset,
+    ).batched(train_config.batch_size, collation_fn=train_collate_fn)
+
+    test_loader = wds.WebLoader(
+        test_dataset,
+    ).batched(train_config.batch_size, collation_fn=train_collate_fn)
 
     if args.continue_:
         if not args.from_:
@@ -354,8 +367,8 @@ if __name__ == "__main__":
 
     train(
         model=model,
-        train_dataloader=train_dataloader,
-        test_dataloader=test_dataloader,
+        train_dataloader=train_loader,
+        test_dataloader=test_loader,
         optimizer=adam,
         loss_fn=triplet_loss,
         mine_strategy=train_config.mine_strategy,

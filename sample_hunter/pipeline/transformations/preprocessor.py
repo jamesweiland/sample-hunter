@@ -15,7 +15,7 @@ from .functional import (
     resample,
 )
 from sample_hunter.config import PreprocessConfig
-from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+from sample_hunter.pipeline.data_loading import load_tensor_from_mp3_bytes
 from sample_hunter._util import DEVICE
 
 
@@ -89,7 +89,7 @@ class Preprocessor:
 
             elif isinstance(data, bytes):
                 # try to read the bytes as an mp3 file
-                signal, sample_rate = load_tensor_from_bytes(data)
+                signal, sample_rate = load_tensor_from_mp3_bytes(data)
             elif isinstance(data, torch.Tensor):
                 # if a tensor is passed, a sample_rate has to be passed too
                 assert sample_rate is not None
