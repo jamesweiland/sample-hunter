@@ -11,6 +11,7 @@ from sample_hunter._util import DEVICE
 def evaluate(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
+    mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY,
     margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
     device: str = DEVICE,
 ) -> Tuple[float, float, float]:
@@ -33,6 +34,7 @@ def evaluate(
                 model=model,
                 positive=positive,
                 anchor=anchor,
+                mine_strategy=mine_strategy,
                 song_ids=keys,
                 margin=margin,
                 device=device,
