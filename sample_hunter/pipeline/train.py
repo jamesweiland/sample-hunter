@@ -1,6 +1,4 @@
-import functools
 import uuid
-import numpy as np
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -10,7 +8,7 @@ import argparse
 from pathlib import Path
 import webdataset as wds
 
-from .data_loading import load_tensor_from_pth_bytes, load_webdataset, reshuffle_batches
+from .data_loading import load_webdataset
 from .encoder_net import EncoderNet
 from .triplet_loss import topk_triplet_accuracy, triplet_accuracy, mine_negative
 from .evaluate import evaluate
@@ -48,7 +46,6 @@ def train_single_epoch(
     epoch_total_topk_accuracy = 0.0
     epoch_total_loss = 0.0
     for anchor, positive, keys in dataloader:
-        print("starting train iteration")
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
@@ -202,27 +199,17 @@ def train(
     print("Finished training")
 
 
-def train_map_fn(ex: Dict[str, Any]) -> Dict[str, Any]:
-    ex["anchor"] = load_tensor_from_pth_bytes(ex["anchor.pth"])
-    ex["positive"] = load_tensor_from_pth_bytes(ex["positive.pth"])
-    return ex
-
-
 def train_collate_fn(
     batch: List[Dict[str, Any]],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    anchors = torch.stack([ex["anchor"] for ex in batch])
-    positives = torch.stack([ex["positive"] for ex in batch])
-    print(anchors.shape)
+    anchors = torch.stack([ex["anchor.pth"] for ex in batch]).squeeze(1)
+    positives = torch.stack([ex["positive.pth"] for ex in batch]).squeeze(1)
 
     # have to one-hot encode 128-bit uuids to smaller ints
-    uuids = [uuid.UUID(ex["json"]["song_id"]).int for ex in batch]
-    print(len(uuids))
+    uuids = [uuid.UUID(ex["json"]["song_id"][0]) for ex in batch]
     unique_uuids = list(set(uuids))
-    print(len(unique_uuids))
-    uuid_to_int = {u: i for i, u in enumerate(uuids)}
+    uuid_to_int = {u: i for i, u in enumerate(unique_uuids)}
     keys = torch.tensor([uuid_to_int[u] for u in uuids])
-    print(keys.shape)
     return anchors, positives, keys
 
 
@@ -287,9 +274,6 @@ if __name__ == "__main__":
         encoder_net_config = EncoderNetConfig()
 
     # load the datasets, try to get them local first and if not, load from hf
-    shuffler = functools.partial(
-        reshuffle_batches, buffersize=100 * train_config.batch_size
-    )
     if Path(args.dataset).exists():
         # load locally
         dataset_dir = Path(args.dataset)
@@ -301,13 +285,8 @@ if __name__ == "__main__":
         train_tars = [str(tar) for tar in train_tars]
         test_tars = [str(tar) for tar in test_tars]
 
-        train_dataset = wds.WebDataset(train_tars).decode()
-        test_dataset = wds.WebDataset(test_tars).decode()
-
-        for ex in train_dataset:
-            print(ex.keys())
-            print(type(ex["positive.pth"]))
-            exit(0)
+        train_dataset = wds.WebDataset(train_tars).shuffle(50_000).decode()
+        test_dataset = wds.WebDataset(test_tars).shuffle(50_000).decode()
 
     else:
         # load from hf
@@ -321,8 +300,8 @@ if __name__ == "__main__":
                     cache_dir=train_config.cache_dir,
                 ),
             )
-            .shuffle(10 * train_config.batch_size)
-            .map(train_map_fn)
+            .shuffle(50_000)
+            .decode()
         )
         test_dataset = (
             cast(
@@ -334,47 +313,20 @@ if __name__ == "__main__":
                     cache_dir=train_config.cache_dir,
                 ),
             )
-            .shuffle(10 * train_config.batch_size)
-            .map(train_map_fn)
+            .shuffle(50_000)
+            .decode()
         )
 
     if args.num:
         train_dataset = train_dataset.slice(args.num)
 
-    # for ex in train_dataset:
-    #     print(ex.keys())
-    #     print(type(ex["anchor.mp3"]))
-    #     print(type(ex["positive.mp3"]))
-    #     print(type(ex["json"]))
-    #     print(ex["json"].keys())
-
-    #     ex["anchor"] = load_tensor_from_pth_bytes(ex["anchor.mp3"])
-    #     ex["positive"] = load_tensor_from_pth_bytes(ex["positive.mp3"])
-
-    #     print(type(ex["anchor"]))
-    #     print(type(ex["positive"]))
-    #     print(ex["anchor"].shape)
-    #     print(ex["positive"].shape)
-    #     exit(0)
-
-    train_dataloader = wds.WebLoader(
+    train_loader = wds.WebLoader(
         train_dataset,
-        batch_size=train_config.batch_size,
-        collate_fn=train_collate_fn,
-    )
+    ).batched(train_config.batch_size, collation_fn=train_collate_fn)
 
-    train_dataloader = wds.WebLoader(
+    test_loader = wds.WebLoader(
         test_dataset,
-        batch_size=train_config.batch_size,
-        collate_fn=train_collate_fn,
-    )
-
-    for anchor, positive, keys in train_dataloader:
-        print("dataloader worked")
-        print(anchor.shape)
-        print(positive.shape)
-        print(keys.shape)
-        exit(0)
+    ).batched(train_config.batch_size, collation_fn=train_collate_fn)
 
     if args.continue_:
         if not args.from_:
@@ -415,8 +367,8 @@ if __name__ == "__main__":
 
     train(
         model=model,
-        train_dataloader=train_dataloader,
-        test_dataloader=test_dataloader,
+        train_dataloader=train_loader,
+        test_dataloader=test_loader,
         optimizer=adam,
         loss_fn=triplet_loss,
         mine_strategy=train_config.mine_strategy,
