@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Tuple, cast
 import argparse
 from pathlib import Path
 import webdataset as wds
+from tqdm.notebook import tqdm
 
 from .data_loading import load_webdataset
 from .encoder_net import EncoderNet
@@ -45,7 +46,7 @@ def train_single_epoch(
     epoch_total_accuracy = 0.0
     epoch_total_topk_accuracy = 0.0
     epoch_total_loss = 0.0
-    for anchor, positive, keys in dataloader:
+    for anchor, positive, keys in tqdm(dataloader):
         anchor_batch = anchor.to(device)
         positive_batch = positive.to(device)
         keys = keys.to(device)
@@ -202,8 +203,12 @@ def train(
 def train_collate_fn(
     batch: List[Dict[str, Any]],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    anchors = torch.stack([ex["anchor.pth"] for ex in batch]).squeeze(1)
-    positives = torch.stack([ex["positive.pth"] for ex in batch]).squeeze(1)
+    anchors = torch.stack(
+        [ex.get("anchor.pth", ex["anchor.mp3"]) for ex in batch]
+    ).squeeze(1)
+    positives = torch.stack(
+        [ex.get("positive.pth", ex["positive.mp3"]) for ex in batch]
+    ).squeeze(1)
 
     # have to one-hot encode 128-bit uuids to smaller ints
     uuids = [uuid.UUID(ex["json"]["song_id"][0]) for ex in batch]
