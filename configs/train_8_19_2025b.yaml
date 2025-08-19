@@ -9,7 +9,7 @@ spec_num_sec: 1.0
 batch_size: 2000
 learning_rate: 0.005
 num_epochs: 10
-triplet_loss_margin: 0.2
+triplet_loss_margin: 0.5
 tensorboard_log_dir: "/content/drive/MyDrive/sample-hunter/8-19-2025b/logs"
 tensorboard: "epoch"
 cache_dir: "/content/drive/MyDrive/sample-hunter/cache"
