@@ -159,9 +159,7 @@ def load_webdataset(
     arbitary 0 padding, for all i found in the split."""
     if isinstance(split, str):
         pipes = build_pipes(repo_id, split, token=token)
-        return wds.WebDataset(
-            pipes, shardshuffle=len(pipes), cache_dir=cache_dir
-        ).decode()
+        return wds.WebDataset(pipes, shardshuffle=len(pipes), cache_dir=cache_dir)
     else:
         # there are multiple splits, and we'll return a dict of datasets
         datasets = {}
@@ -169,6 +167,6 @@ def load_webdataset(
             pipes = build_pipes(repo_id, s, token=token)
             dataset = wds.WebDataset(
                 pipes, shardshuffle=len(pipes), cache_dir=cache_dir
-            ).decode()
+            )
             datasets.update({s: dataset})
         return datasets
