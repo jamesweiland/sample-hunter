@@ -264,14 +264,10 @@ if __name__ == "__main__":
     args = parse_args()
 
     if args.config:
-        preprocess_config = PreprocessConfig.from_yaml(args.config)
         train_config = TrainConfig.from_yaml(args.config)
-        obfuscator_config = ObfuscatorConfig.from_yaml(args.config)
         encoder_net_config = EncoderNetConfig.from_yaml(args.config)
     else:
-        preprocess_config = PreprocessConfig()
         train_config = TrainConfig()
-        obfuscator_config = ObfuscatorConfig()
         encoder_net_config = EncoderNetConfig()
 
     # load the datasets, try to get them local first and if not, load from hf
