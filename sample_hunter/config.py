@@ -143,7 +143,8 @@ class ObfuscatorConfig(YAMLConfig):
 
 @dataclass
 class TrainConfig(YAMLConfig):
-    batch_size: int = 2000
+    source_batch_size: int = 150
+    sub_batch_size: int = 2000
     learning_rate: float = 0.005
     num_epochs: int = 10
     triplet_loss_margin: float = DEFAULT_TRIPLET_LOSS_MARGIN

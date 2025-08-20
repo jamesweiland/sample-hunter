@@ -147,10 +147,10 @@ class Preprocessor:
         if train:
             ob_windows = self.obfuscate(signal)
 
-            anchor = config.mel_spectrogram(signal)
-            positive = config.mel_spectrogram(ob_windows)
+            anchor = config.mel_spectrogram(signal).squeeze(0)
+            positive = config.mel_spectrogram(ob_windows).squeeze(0)
 
-            return positive, anchor
+            return anchor, positive
         else:
             # make a list of audio signals that are offset from
             # -offset_span to offset_span, stepped through by offset_step
@@ -178,7 +178,7 @@ class Preprocessor:
 
             # return anchors
 
-            anchor = config.mel_spectrogram(signal)
+            anchor = config.mel_spectrogram(signal).squeeze(0)
 
             # if not train, just return the regular transformation
             return anchor

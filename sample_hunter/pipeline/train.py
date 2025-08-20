@@ -7,9 +7,12 @@ from typing import Any, Callable, Dict, List, Tuple, cast
 import argparse
 from pathlib import Path
 import webdataset as wds
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
-from .data_loading import load_webdataset
+from sample_hunter.pipeline.transformations.obfuscator import Obfuscator
+from sample_hunter.pipeline.transformations.preprocessor import Preprocessor
+
+from .data_loading import load_tensor_from_mp3_bytes, load_webdataset
 from .encoder_net import EncoderNet
 from .triplet_loss import topk_triplet_accuracy, triplet_accuracy, mine_negative
 from .evaluate import evaluate
@@ -31,6 +34,7 @@ def train_single_epoch(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
     loss_fn: Callable[..., Tensor],
+    batch_size: int,
     mine_strategy: str,
     optimizer: torch.optim.Optimizer,
     device: str,
@@ -46,49 +50,54 @@ def train_single_epoch(
     epoch_total_accuracy = 0.0
     epoch_total_topk_accuracy = 0.0
     epoch_total_loss = 0.0
-    for anchor, positive, keys in tqdm(dataloader):
-        anchor_batch = anchor.to(device)
-        positive_batch = positive.to(device)
-        keys = keys.to(device)
+    for batch in dataloader:
+        sub_batches = flatten(batch, batch_size)
+        for anchor, positive, keys in sub_batches:
+            anchor_batch = anchor.to(device)
+            positive_batch = positive.to(device)
+            keys = keys.to(device)
+            print(f"unique ids in sub batch: {torch.unique(keys).shape}")
 
-        # predict embeddings
-        anchor_embeddings = model(anchor_batch)
-        positive_embeddings = model(positive_batch)
+            # predict embeddings
+            anchor_embeddings = model(anchor_batch)
+            positive_embeddings = model(positive_batch)
 
-        # mine the negative embedding
-        negative_embeddings = mine_negative(
-            anchor_embeddings=anchor_embeddings,
-            positive_embeddings=positive_embeddings,
-            song_ids=keys,
-            mine_strategy=mine_strategy,
-            margin=triplet_loss_margin,
-        )
-        # calculate loss
-        loss = loss_fn(anchor_embeddings, positive_embeddings, negative_embeddings)
+            # mine the negative embedding
+            negative_embeddings = mine_negative(
+                anchor_embeddings=anchor_embeddings,
+                positive_embeddings=positive_embeddings,
+                song_ids=keys,
+                mine_strategy=mine_strategy,
+                margin=triplet_loss_margin,
+            )
+            # calculate loss
+            loss = loss_fn(anchor_embeddings, positive_embeddings, negative_embeddings)
 
-        # backpropagate loss and update weights
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            # backpropagate loss and update weights
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        accuracy = triplet_accuracy(
-            anchor=anchor_embeddings,
-            positive=positive_embeddings,
-            negative=negative_embeddings,
-            margin=triplet_loss_margin,
-        )
+            accuracy = triplet_accuracy(
+                anchor=anchor_embeddings,
+                positive=positive_embeddings,
+                negative=negative_embeddings,
+                margin=triplet_loss_margin,
+            )
 
-        topk_accuracy = topk_triplet_accuracy(anchor_embeddings, positive_embeddings)
+            topk_accuracy = topk_triplet_accuracy(
+                anchor_embeddings, positive_embeddings
+            )
 
-        if writer:
-            writer.add_scalar("Training loss", loss.item(), num_batches)
-            writer.add_scalar("Training accuracy", accuracy, num_batches)
-            writer.add_scalar("Training top K accuracy", topk_accuracy, num_batches)
+            if writer:
+                writer.add_scalar("Training loss", loss.item(), num_batches)
+                writer.add_scalar("Training accuracy", accuracy, num_batches)
+                writer.add_scalar("Training top K accuracy", topk_accuracy, num_batches)
 
-        epoch_total_loss += loss.item()
-        epoch_total_accuracy += accuracy
-        epoch_total_topk_accuracy += topk_accuracy
-        num_batches += 1
+            epoch_total_loss += loss.item()
+            epoch_total_accuracy += accuracy
+            epoch_total_topk_accuracy += topk_accuracy
+            num_batches += 1
 
     epoch_average_loss = epoch_total_loss / num_batches
     print(f"Average loss of epoch: {epoch_average_loss}")
@@ -104,6 +113,7 @@ def train(
     train_dataloader: torch.utils.data.DataLoader,
     loss_fn: Callable,
     mine_strategy: str,
+    sub_batch_size: int,
     optimizer: torch.optim.Optimizer,
     num_epochs: range,
     triplet_loss_margin: float,
@@ -163,6 +173,7 @@ def train(
             model=model,
             dataloader=train_dataloader,
             loss_fn=loss_fn,
+            batch_size=sub_batch_size,
             mine_strategy=mine_strategy,
             optimizer=optimizer,
             device=device,
@@ -203,15 +214,43 @@ def train(
 def train_collate_fn(
     batch: List[Dict[str, Any]],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    anchors = torch.stack([ex["anchor.pth"] for ex in batch]).squeeze(1)
-    positives = torch.stack([ex["positive.pth"] for ex in batch]).squeeze(1)
+    anchors = []
+    positives = []
+    num_examples_per_song = []
+    uuids = []
+    for i in range(len(batch)):
+        ex = batch[i]
+        anchors.append(ex["anchor"].squeeze(0))
+        positives.append(ex["positive"].squeeze(0))
+        num_examples_per_song.append(anchors[i].shape[0])
+        uuids.append(uuid.UUID(ex["json"]["id"][0]))
 
-    # have to one-hot encode 128-bit uuids to smaller ints
-    uuids = [uuid.UUID(ex["json"]["song_id"][0]) for ex in batch]
-    unique_uuids = list(set(uuids))
-    uuid_to_int = {u: i for i, u in enumerate(unique_uuids)}
+    anchors = torch.cat(anchors, dim=0)
+    positives = torch.cat(positives, dim=0)
+    uuid_to_int = {u: i for i, u in enumerate(uuids)}
+
     keys = torch.tensor([uuid_to_int[u] for u in uuids])
+    print(f"unique ids in entire source batch: {keys.shape}")
+    keys = torch.repeat_interleave(keys, torch.tensor(num_examples_per_song))
+
+    # shuffle the stuff
+    print(keys.shape)
+    print(anchors.shape)
+    print(positives.shape)
+    assert keys.shape[0] == anchors.shape[0] and keys.shape[0] == positives.shape[0]
+    index = torch.randperm(keys.shape[0])
+    anchors = anchors[index]
+    positives = positives[index]
+    keys = keys[index]
+
     return anchors, positives, keys
+
+
+def flatten(batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_size: int):
+    """splits batch up into sub_batches with size `batch_size`."""
+    sub_batches = [torch.split(t, batch_size) for t in batch]
+    for sub_batch in zip(*sub_batches):
+        yield sub_batch
 
 
 def parse_args() -> argparse.Namespace:
@@ -266,9 +305,13 @@ if __name__ == "__main__":
     if args.config:
         train_config = TrainConfig.from_yaml(args.config)
         encoder_net_config = EncoderNetConfig.from_yaml(args.config)
+        preprocess_config = PreprocessConfig.from_yaml(args.config)
+        obfuscator_config = ObfuscatorConfig.from_yaml(args.config)
     else:
         train_config = TrainConfig()
         encoder_net_config = EncoderNetConfig()
+        preprocess_config = PreprocessConfig()
+        obfuscator_config = ObfuscatorConfig()
 
     # load the datasets, try to get them local first and if not, load from hf
     if Path(args.dataset).exists():
@@ -282,8 +325,8 @@ if __name__ == "__main__":
         train_tars = [str(tar) for tar in train_tars]
         test_tars = [str(tar) for tar in test_tars]
 
-        train_dataset = wds.WebDataset(train_tars).shuffle(50_000).decode()
-        test_dataset = wds.WebDataset(test_tars).shuffle(50_000).decode()
+        train_dataset = wds.WebDataset(train_tars).shuffle(200).decode()
+        test_dataset = wds.WebDataset(test_tars).shuffle(200).decode()
 
     else:
         # load from hf
@@ -297,7 +340,7 @@ if __name__ == "__main__":
                     cache_dir=train_config.cache_dir,
                 ),
             )
-            .shuffle(50_000)
+            .shuffle(200)
             .decode()
         )
         test_dataset = (
@@ -310,72 +353,91 @@ if __name__ == "__main__":
                     cache_dir=train_config.cache_dir,
                 ),
             )
-            .shuffle(50_000)
+            .shuffle(200)
             .decode()
         )
 
-    if args.num:
-        train_dataset = train_dataset.slice(args.num)
+    with Preprocessor(
+        config=preprocess_config, obfuscator=Obfuscator(config=obfuscator_config)
+    ) as preprocessor:
 
-    train_loader = wds.WebLoader(
-        train_dataset,
-    ).batched(train_config.batch_size, collation_fn=train_collate_fn)
+        def train_map_fn(example):
+            audio, sr = load_tensor_from_mp3_bytes(example["mp3"], DEVICE)
+            print("preprocessing")
+            anchor, positive = preprocessor(audio, sample_rate=sr, train=True)
+            example["anchor"] = anchor.to("cpu")
+            example["positive"] = positive.to("cpu")
 
-    test_loader = wds.WebLoader(
-        test_dataset,
-    ).batched(train_config.batch_size, collation_fn=train_collate_fn)
+            print("example processed")
 
-    if args.continue_:
-        if not args.from_:
-            raise ValueError("--continue was given with no model to load in")
-        if not args.from_.exists():
-            raise ValueError(f"--from not found: {args.from_}")
-        if not str(args.from_.stem).split("-")[-1].isdigit():
-            raise ValueError(
-                f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
-                "The stem must follow the format: <stem_name>-<epoch>"
-            )
+            return example
 
-        epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
-        if epochs_already_trained >= train_config.num_epochs:
-            raise ValueError(
-                "The model has already been trained for more epochs than specified in the config for num_epochs\n"
-                f"Epochs already trained: {epochs_already_trained}\n"
-                f"Config num_epochs: {train_config.num_epochs}"
-            )
+        train_dataset = train_dataset.map(train_map_fn)
+        test_dataset = test_dataset.map(train_map_fn)
 
-        model = load_model(args.from_, encoder_net_config)
-        num_epochs = range(epochs_already_trained + 1, train_config.num_epochs + 1)
-    elif args.from_:
-        if not args.from_.exists():
-            raise ValueError(f"--from not found: {args.from_}")
+        if args.num:
+            train_dataset = train_dataset.slice(args.num)
 
-        model = load_model(args.from_, encoder_net_config)
-        num_epochs = range(1, train_config.num_epochs + 1)
-    else:
-        # make a new model
-        model = EncoderNet(encoder_net_config).to(DEVICE)  # type: ignore
-        num_epochs = range(1, train_config.num_epochs + 1)
+        train_loader = wds.WebLoader(
+            train_dataset,
+        ).batched(train_config.source_batch_size, collation_fn=train_collate_fn)
 
-    save_per_epoch = args.out if args.save_per_epoch else None
+        test_loader = wds.WebLoader(
+            test_dataset,
+        ).batched(train_config.source_batch_size, collation_fn=train_collate_fn)
 
-    adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
-    triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
+        if args.continue_:
+            if not args.from_:
+                raise ValueError("--continue was given with no model to load in")
+            if not args.from_.exists():
+                raise ValueError(f"--from not found: {args.from_}")
+            if not str(args.from_.stem).split("-")[-1].isdigit():
+                raise ValueError(
+                    f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
+                    "The stem must follow the format: <stem_name>-<epoch>"
+                )
 
-    train(
-        model=model,
-        train_dataloader=train_loader,
-        test_dataloader=test_loader,
-        optimizer=adam,
-        loss_fn=triplet_loss,
-        mine_strategy=train_config.mine_strategy,
-        log_dir=train_config.tensorboard_log_dir,
-        tensorboard=train_config.tensorboard,
-        device=DEVICE,
-        num_epochs=num_epochs,
-        triplet_loss_margin=train_config.triplet_loss_margin,
-        save_per_epoch=save_per_epoch,
-    )
+            epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
+            if epochs_already_trained >= train_config.num_epochs:
+                raise ValueError(
+                    "The model has already been trained for more epochs than specified in the config for num_epochs\n"
+                    f"Epochs already trained: {epochs_already_trained}\n"
+                    f"Config num_epochs: {train_config.num_epochs}"
+                )
 
-    torch.save(model.state_dict(), args.out)
-    print(f"Model saved to {args.out}")
+            model = load_model(args.from_, encoder_net_config)
+            num_epochs = range(epochs_already_trained + 1, train_config.num_epochs + 1)
+        elif args.from_:
+            if not args.from_.exists():
+                raise ValueError(f"--from not found: {args.from_}")
+
+            model = load_model(args.from_, encoder_net_config)
+            num_epochs = range(1, train_config.num_epochs + 1)
+        else:
+            # make a new model
+            model = EncoderNet(encoder_net_config).to(DEVICE)  # type: ignore
+            num_epochs = range(1, train_config.num_epochs + 1)
+
+        save_per_epoch = args.out if args.save_per_epoch else None
+
+        adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
+        triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
+
+        train(
+            model=model,
+            train_dataloader=train_loader,
+            test_dataloader=test_loader,
+            optimizer=adam,
+            loss_fn=triplet_loss,
+            sub_batch_size=train_config.sub_batch_size,
+            mine_strategy=train_config.mine_strategy,
+            log_dir=train_config.tensorboard_log_dir,
+            tensorboard=train_config.tensorboard,
+            device=DEVICE,
+            num_epochs=num_epochs,
+            triplet_loss_margin=train_config.triplet_loss_margin,
+            save_per_epoch=save_per_epoch,
+        )
+
+        torch.save(model.state_dict(), args.out)
+        print(f"Model saved to {args.out}")
