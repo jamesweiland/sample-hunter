@@ -116,7 +116,7 @@ class ObfuscatorConfig(YAMLConfig):
     highpass_range: Tuple[int, int] = (20, 1000)
     musan_noise_range: Tuple[float, float] = (-5, 5)
     offset_span: float = (
-        0.25  # offset each sample randomly from -offset_span seconds to offset_span seconds
+        0.0  # offset each sample randomly from -offset_span seconds to offset_span seconds
     )
     lowpass_frac: float = 0.5
     musan: Path = Path("/home/james/code/sample-hunter/_data/musan")
