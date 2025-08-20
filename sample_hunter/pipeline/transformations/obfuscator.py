@@ -91,7 +91,7 @@ class Obfuscator:
         with torch.no_grad():
             batch = batch.contiguous() if not batch.is_contiguous() else batch
 
-            batch = self.make_offset_windows(batch)
+            # batch = self.make_offset_windows(batch)
 
             batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)

@@ -137,16 +137,15 @@ class Preprocessor:
             signal, self.config.spec_num_samples, self.config.volume_threshold
         )
 
+        signal = create_windows(
+            signal,
+            target_length=target_length,
+            window_num_samples=config.spec_num_samples,
+            step_num_samples=config.step_num_samples,
+        )
+
         if train:
             ob_windows = self.obfuscate(signal)
-
-            # make windows without overlay for training
-            signal = create_windows(
-                signal,
-                target_length=target_length,
-                window_num_samples=config.spec_num_samples,
-                step_num_samples=config.spec_num_samples,
-            )
 
             anchor = config.mel_spectrogram(signal)
             positive = config.mel_spectrogram(ob_windows)
@@ -178,13 +177,6 @@ class Preprocessor:
             # anchors = [config.mel_spectrogram(offset) for offset in offsets]
 
             # return anchors
-
-            signal = create_windows(
-                signal,
-                target_length=target_length,
-                window_num_samples=config.spec_num_samples,
-                step_num_samples=config.step_num_samples,
-            )
 
             anchor = config.mel_spectrogram(signal)
 
