@@ -20,7 +20,6 @@ DEFAULT_TRIPLET_LOSS_MARGIN: float = 0.2
 DEFAULT_MINE_STRATEGY: Literal["semi", "hard"] = "hard"
 DEFAULT_TOP_K: int = 20
 DEFAULT_VOLUME_THRESHOLD: int = -60  # dbfs, remove anything below this
-DEFAULT_TARGET_RMS: float = 0.1
 
 DEFAULT_DATASET_REPO: str = "samplr/specs"
 DEFAULT_CACHE_DIR: Path = Path("/content/drive/MyDrive/sample-hunter/cache")
@@ -128,7 +127,6 @@ class ObfuscatorConfig(YAMLConfig):
     step_num_sec: float = DEFAULT_STEP_NUM_SEC
     volume_threshold: int = DEFAULT_VOLUME_THRESHOLD
     perturb_num_workers: int = 1
-    target_rms: float = DEFAULT_TARGET_RMS
 
     @property
     def offset_span_num_samples(self) -> int:
@@ -165,7 +163,6 @@ class PreprocessConfig(YAMLConfig):
     step_num_sec: float = DEFAULT_STEP_NUM_SEC
     spec_num_sec: float = DEFAULT_SPEC_NUM_SEC
     volume_threshold: int = DEFAULT_VOLUME_THRESHOLD  # dB
-    target_rms: float = DEFAULT_TARGET_RMS
 
     @property
     def step_num_samples(self) -> int:

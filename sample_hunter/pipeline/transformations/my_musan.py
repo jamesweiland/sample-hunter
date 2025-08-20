@@ -42,14 +42,8 @@ class MyMusan(torch.utils.data.Dataset):
         spec_num_sec: float | None = None,
         step_num_sec: float | None = None,
         volume_threshold: int | None = None,
-        target_rms: float | None = None,
     ):
-        if (
-            not sample_rate
-            or not spec_num_sec
-            or not volume_threshold
-            or not target_rms
-        ):
+        if not sample_rate or not spec_num_sec or not volume_threshold:
             default_config = PreprocessConfig()
             self.sample_rate = sample_rate or default_config.sample_rate
             self.spec_num_sec = spec_num_sec or default_config.spec_num_sec
@@ -57,13 +51,11 @@ class MyMusan(torch.utils.data.Dataset):
             self.step_num_sec = step_num_sec or default_config.step_num_sec
             self.step_num_samples = int(self.step_num_sec * self.sample_rate)
             self.volume_threshold = volume_threshold or default_config.volume_threshold
-            self.target_rms = target_rms or default_config.target_rms
         else:
             self.sample_rate = sample_rate
             self.spec_num_sec = spec_num_sec
             self.spec_num_samples = int(self.sample_rate * self.spec_num_sec)
             self.volume_threshold = volume_threshold
-            self.target_rms = target_rms
 
         self.musan = Musan(root, subset=subset)
         self.resample = torchaudio.transforms.Resample(
