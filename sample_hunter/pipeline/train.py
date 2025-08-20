@@ -1,3 +1,4 @@
+import gc
 import uuid
 import torch
 import torch.nn as nn
@@ -226,6 +227,8 @@ def train_collate_fn(
 
     anchors = torch.cat(anchors, dim=0)
     positives = torch.cat(positives, dim=0)
+    del batch
+    gc.collect()
     uuid_to_int = {u: i for i, u in enumerate(uuids)}
 
     keys = torch.tensor([uuid_to_int[u] for u in uuids])
@@ -234,6 +237,8 @@ def train_collate_fn(
     # shuffle the stuff
     assert keys.shape[0] == anchors.shape[0] and keys.shape[0] == positives.shape[0]
     index = torch.randperm(keys.shape[0])
+    # collect once more before a very memory intensive shuffle
+    gc.collect()
     anchors = anchors.view(-1)[index].view(anchors.size())
     positives = positives.view(-1)[index].view(positives.size())
     keys = keys.view(-1)[index].view(keys.size())
