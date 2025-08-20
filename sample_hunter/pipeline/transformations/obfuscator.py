@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 import random
 import torchaudio
 import torch
@@ -91,7 +92,7 @@ class Obfuscator:
         with torch.no_grad():
             batch = batch.contiguous() if not batch.is_contiguous() else batch
 
-            batch = self.make_offset_windows(batch)
+            # batch = self.make_offset_windows(batch)
 
             batch = self.time_stretch_perturbation(batch)
             batch = self.pitch_perturbation(batch)
@@ -258,33 +259,53 @@ class Obfuscator:
 
 
 if __name__ == "__main__":
-    pass
     # listen to obfuscated vs original audio
-    # from .preprocessor import Preprocessor
-    # from sample_hunter.pipeline.data_loading import load_webdataset
-    # from sample_hunter._util import HF_TOKEN, play_tensor_audio, plot_spectrogram
-    # from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
+    from .preprocessor import Preprocessor
+    import webdataset as wds
+    from .functional import (
+        mix_channels,
+        resample,
+        remove_low_volume_windows,
+        create_windows,
+        rms_normalize,
+    )
+    from sample_hunter._util import HF_TOKEN, play_tensor_audio, plot_spectrogram
+    from sample_hunter.pipeline.data_loading import load_tensor_from_bytes
 
-    # with Preprocessor() as preprocessor:
-    #     dataset = load_webdataset("samplr/songs", "train", HF_TOKEN)
+    with Preprocessor() as preprocessor:
+        train_tars = Path("./_data/webdataset-shards/train").glob("*.tar")
+        train_tars = [str(tar) for tar in train_tars]
+        dataset = wds.WebDataset(train_tars).decode()
 
-    #     def map_fn(ex):
-    #         positive, anchor = preprocessor(ex["mp3"], train=True)
+        def map_fn(ex):
+            positive, anchor = preprocessor(ex["mp3"], train=True)
+            signal, sr = load_tensor_from_bytes(ex["mp3"])
+            signal = mix_channels(signal)
+            signal = resample(signal, sr, 44_100)
+            signal = create_windows(signal, int(44_100 * 1), int(44_100 * 0.5))
+            signal = remove_low_volume_windows(signal, -50)
+            # signal = remove_low_volume_windows(signal, -50)
+            positive_audio = preprocessor.obfuscate(signal)
+            anchor = preprocessor.config.mel_spectrogram(signal)
+            positive = preprocessor.config.mel_spectrogram(positive_audio)
 
-    #         return {
-    #             **ex,
-    #             "anchor": anchor,
-    #             "positive": positive,
-    #         }
+            return {
+                **ex,
+                "anchor_audio": signal,
+                "positive_audio": positive_audio,
+                "anchor": anchor,
+                "positive": positive,
+            }
 
-    #     dataset = dataset.map(map_fn)
-    #     for ex in dataset:
-    #         print(f"Song: {ex["json"]["title"]}\n")
+        dataset = dataset.map(map_fn)
+        for ex in dataset:
+            print(f"Song: {ex["json"]["title"]}\n")
 
-    #         for i in range(min(ex["anchor"].shape[0], 10)):
-    #             #     play_tensor_audio(ex["anchor"][i], f"Playing anchor {i}...")
-    #             #     play_tensor_audio(ex["positive"][i], f"Playing positive {i}...")
-    #             plot_spectrogram(ex["anchor"][i], f"anchor {i}")
-    #             plot_spectrogram(ex["positive"][i], f"positive {i}")
+            for i in range(min(ex["anchor"].shape[0], 10)):
+                print(ex["anchor"][i].shape)
+                play_tensor_audio(ex["anchor_audio"][i], f"Playing anchor {i}...")
+                play_tensor_audio(ex["positive_audio"][i], f"Playing positive {i}...")
+                # plot_spectrogram(ex["anchor"][i], f"anchor {i}")
+                # plot_spectrogram(ex["positive"][i], f"positive {i}")
 
-    #         print("--------------------------------------------------")
+            print("--------------------------------------------------")
