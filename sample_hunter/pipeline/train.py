@@ -219,8 +219,8 @@ def train_collate_fn(
     uuids = []
     for i in range(len(batch)):
         ex = batch[i]
-        anchors.append(ex["anchor"].squeeze(0))
-        positives.append(ex["positive"].squeeze(0))
+        anchors.append(ex["anchor"].view(ex["anchor"].shape[1:]))
+        positives.append(ex["positive"].view(ex["positive"].shape[1:]))
         num_examples_per_song.append(anchors[i].shape[0])
         uuids.append(uuid.UUID(ex["json"]["id"][0]))
 
@@ -234,9 +234,9 @@ def train_collate_fn(
     # shuffle the stuff
     assert keys.shape[0] == anchors.shape[0] and keys.shape[0] == positives.shape[0]
     index = torch.randperm(keys.shape[0])
-    anchors = anchors[index]
-    positives = positives[index]
-    keys = keys[index]
+    anchors = anchors.view(-1)[index].view(anchors.size())
+    positives = positives.view(-1)[index].view(positives.size())
+    keys = keys.view(-1)[index].view(keys.size())
 
     return anchors, positives, keys
 
