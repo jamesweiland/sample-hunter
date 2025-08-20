@@ -20,6 +20,7 @@ DEFAULT_TRIPLET_LOSS_MARGIN: float = 0.2
 DEFAULT_MINE_STRATEGY: Literal["semi", "hard"] = "hard"
 DEFAULT_TOP_K: int = 20
 DEFAULT_VOLUME_THRESHOLD: int = -60  # dbfs, remove anything below this
+DEFAULT_TARGET_RMS: float = 0.1
 
 DEFAULT_DATASET_REPO: str = "samplr/songs"
 DEFAULT_CACHE_DIR: Path = Path("/home/james/code/sample-hunter/_data/cache")
@@ -114,7 +115,7 @@ class ObfuscatorConfig(YAMLConfig):
     )
     lowpass_range: Tuple[int, int] = (6_000, 12_000)
     highpass_range: Tuple[int, int] = (20, 1000)
-    musan_noise_range: Tuple[float, float] = (-5, 5)
+    musan_noise_range: Tuple[float, float] = (15, 30)
     offset_span: float = (
         0.0  # offset each sample randomly from -offset_span seconds to offset_span seconds
     )
@@ -127,6 +128,7 @@ class ObfuscatorConfig(YAMLConfig):
     step_num_sec: float = DEFAULT_STEP_NUM_SEC
     volume_threshold: int = DEFAULT_VOLUME_THRESHOLD
     perturb_num_workers: int = 1
+    target_rms: float = DEFAULT_TARGET_RMS
 
     @property
     def offset_span_num_samples(self) -> int:
@@ -164,16 +166,7 @@ class PreprocessConfig(YAMLConfig):
     step_num_sec: float = DEFAULT_STEP_NUM_SEC
     spec_num_sec: float = DEFAULT_SPEC_NUM_SEC
     volume_threshold: int = DEFAULT_VOLUME_THRESHOLD  # dB
-    offset_span: float = 0.5  # offset audio from -span to span for each window
-    offset_step: float = 0.01  # amount to step each offset through
-
-    @property
-    def offset_span_num_samples(self) -> int:
-        return int(self.offset_span * self.sample_rate)
-
-    @property
-    def offset_step_num_samples(self) -> int:
-        return int(self.offset_step * self.sample_rate)
+    target_rms: float = DEFAULT_TARGET_RMS
 
     @property
     def step_num_samples(self) -> int:

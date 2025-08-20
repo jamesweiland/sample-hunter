@@ -11,6 +11,15 @@ import torchaudio
 from sample_hunter._util import DEVICE
 
 
+def rms_normalize(signal: torch.Tensor, target_rms: float, eps: float = 1e-8):
+    current_rms = torch.sqrt(torch.mean(signal.pow(2), dim=-1, keepdim=True))
+
+    # Avoid division by zero for silent audio
+    scale_factor = target_rms / (current_rms + eps)
+
+    return signal * scale_factor
+
+
 def num_windows(
     length: int,
     window_size: int,

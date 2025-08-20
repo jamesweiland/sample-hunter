@@ -12,6 +12,8 @@ from .functional import (
     create_windows,
     mix_channels,
     remove_low_volume,
+    rms_normalize,
+    remove_low_volume_windows,
     resample,
 )
 from sample_hunter.config import PreprocessConfig
@@ -133,16 +135,14 @@ class Preprocessor:
         # resample to target sampling rate
         signal = resample(signal, sample_rate, config.sample_rate)
 
-        signal = remove_low_volume(
-            signal, self.config.spec_num_samples, self.config.volume_threshold
-        )
-
         signal = create_windows(
             signal,
             target_length=target_length,
             window_num_samples=config.spec_num_samples,
             step_num_samples=config.step_num_samples,
         )
+
+        signal = remove_low_volume_windows(signal, self.config.volume_threshold)
 
         if train:
             ob_windows = self.obfuscate(signal)
