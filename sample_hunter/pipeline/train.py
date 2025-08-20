@@ -214,26 +214,27 @@ def train(
 def train_collate_fn(
     batch: List[Dict[str, Any]],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    with torch.no_grad():
 
-    num_examples_per_song = torch.tensor(
-        [ex["anchor"].shape[1] for ex in batch], device="cpu"
-    )
+        num_examples_per_song = torch.tensor(
+            [ex["anchor"].shape[1] for ex in batch], device="cpu"
+        )
 
-    anchors = torch.cat([ex["anchor"].view(ex["anchor"].shape[1:]) for ex in batch])
-    index = torch.randperm(anchors.shape[0])
-    anchors = anchors[index]
-    gc.collect()
-    positives = torch.cat(
-        [ex["positive"].view(ex["positive"].shape[1:]) for ex in batch]
-    )
-    positives = positives[index]
-    gc.collect()
-    uuids = [uuid.UUID(ex["json"]["id"][0]) for ex in batch]
-    uuid_to_int = {u: i for i, u in enumerate(uuids)}
-    uuids = torch.tensor([uuid_to_int[u] for u in uuids], device="cpu")
-    uuids = torch.repeat_interleave(uuids, num_examples_per_song)
-    uuids = uuids[index]
-    gc.collect()
+        anchors = torch.cat([ex["anchor"].view(ex["anchor"].shape[1:]) for ex in batch])
+        index = torch.randperm(anchors.shape[0])
+        anchors = anchors[index]
+        gc.collect()
+        positives = torch.cat(
+            [ex["positive"].view(ex["positive"].shape[1:]) for ex in batch]
+        )
+        positives = positives[index]
+        gc.collect()
+        uuids = [uuid.UUID(ex["json"]["id"][0]) for ex in batch]
+        uuid_to_int = {u: i for i, u in enumerate(uuids)}
+        uuids = torch.tensor([uuid_to_int[u] for u in uuids], device="cpu")
+        uuids = torch.repeat_interleave(uuids, num_examples_per_song)
+        uuids = uuids[index]
+        gc.collect()
 
     return anchors, positives, uuids
 
@@ -246,7 +247,12 @@ def flatten(
     sub_batches = [torch.split(t, batch_size) for t in batch]
     for sub_batch in zip(*sub_batches):
         sub_batch = tuple(
-            torch.dequantize(t) if t.is_quantized else t for t in sub_batch
+            (
+                torch.dequantize(t).requires_grad_()
+                if t.is_quantized
+                else t.requires_grad_()
+            )
+            for t in sub_batch
         )
         yield sub_batch
 
@@ -363,25 +369,26 @@ if __name__ == "__main__":
         ) as pbar:
 
             def train_map_fn(example):
-                audio, sr = load_tensor_from_mp3_bytes(example["mp3"], DEVICE)
-                anchor, positive = preprocessor(audio, sample_rate=sr, train=True)
-                example["anchor"] = torch.quantize_per_tensor(
-                    anchor.to("cpu"),
-                    train_config.quantize_scale,
-                    train_config.zero_point,
-                    torch.qint8,
-                )
-                example["positive"] = torch.quantize_per_tensor(
-                    positive.to("cpu"),
-                    train_config.quantize_scale,
-                    train_config.zero_point,
-                    torch.qint8,
-                )
+                with torch.no_grad():
+                    audio, sr = load_tensor_from_mp3_bytes(example["mp3"], DEVICE)
+                    anchor, positive = preprocessor(audio, sample_rate=sr, train=True)
+                    example["anchor"] = torch.quantize_per_tensor(
+                        anchor.to("cpu"),
+                        train_config.quantize_scale,
+                        train_config.zero_point,
+                        torch.qint8,
+                    )
+                    example["positive"] = torch.quantize_per_tensor(
+                        positive.to("cpu"),
+                        train_config.quantize_scale,
+                        train_config.zero_point,
+                        torch.qint8,
+                    )
 
-                pbar.update(1)
+                    pbar.update(1)
 
-                if pbar.n == pbar.total:
-                    pbar.reset()
+                    if (pbar.n - 1) == pbar.total:
+                        pbar.reset()
 
                 return example
 
