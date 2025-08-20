@@ -7,7 +7,7 @@ Config used for most recent preprocessing: preprocess_8_6_2025.yaml
 
 import itertools
 import traceback
-from typing import Any, Dict, List
+from typing import Any, Dict
 import torch
 import argparse
 import io
@@ -22,7 +22,7 @@ import torch.multiprocessing as mp
 
 from huggingface_hub import HfApi
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from uuid import uuid4
 from pathlib import Path
 
@@ -39,8 +39,6 @@ from sample_hunter.pipeline.transformations.preprocessor import Preprocessor
 DEFAULT_SHARD_SIZE: int = int(1e9)
 DEFAULT_PROCS: int = 8
 DEFAULT_THREADS: int = 10
-song_num = 1
-lock = threading.Lock()
 
 
 def _fetch_tar_and_upload(q: queue.Queue, target_repo: str, split: str, token: str):
@@ -140,53 +138,45 @@ def add_future_result_to_tar(
     shard_size: int,
 ):
     try:
-        results = future.result()
-        global song_num
-        global lock
-        with lock:
-            print(f"song {song_num}")
-            song_num += 1
+        result = future.result()
     except Exception:
         print("an exception occured trying to access the result of a future")
         traceback.print_exc()
         raise
 
-    for result in results:
-        anchor, positive, metadata = (
-            result["anchor"],
-            result["positive"],
-            result["json"],
-        )
-        anchor = anchor.to("cpu")
-        positive = positive.to("cpu")
-        result_size = anchor.nbytes + positive.nbytes + sys.getsizeof(metadata)
+    anchor, positive, metadata = result["anchor"], result["positive"], result["json"]
+    anchor = anchor.to("cpu")
+    positive = positive.to("cpu")
 
-        if tar is None or (archive_size + result_size) > shard_size:
-            if tar is not None:
-                assert tar_buf is not None
+    result_size = anchor.nbytes + positive.nbytes + len(metadata)
 
-                tar.close()
-                tar_buf.seek(0)
-                tar_result_queue.put(tar_buf)
-                archive_size = 0
+    metadata = json.loads(metadata.decode("utf-8"))
 
-            tar_buf = io.BytesIO()
-            tar = tarfile.open(fileobj=tar_buf, mode="w")
+    if tar is None or (archive_size + result_size) > shard_size:
+        if tar is not None:
+            assert tar_buf is not None
 
-        example_id = metadata["example_id"]
-        anchor_name = f"{example_id}.anchor.pth"
-        positive_name = f"{example_id}.positive.pth"
-        json_name = f"{example_id}.json"
+            tar.close()
+            tar_buf.seek(0)
+            tar_result_queue.put(tar_buf)
+            archive_size = 0
 
-        # add tensors to tar
-        archive_size += write_tensor_to_tar(tar, anchor, anchor_name)
-        archive_size += write_tensor_to_tar(tar, positive, positive_name)
-        archive_size += write_json_to_tar(tar, metadata, json_name)
+        tar_buf = io.BytesIO()
+        tar = tarfile.open(fileobj=tar_buf, mode="w")
 
+    example_id = metadata["example_id"]
+    anchor_name = f"{example_id}.anchor.tar"
+    positive_name = f"{example_id}.positive.tar"
+    json_name = f"{example_id}.json"
+
+    # add tensors to tar
+    archive_size += write_tensor_to_tar(tar, anchor, anchor_name)
+    archive_size += write_tensor_to_tar(tar, positive, positive_name)
+    archive_size += write_json_to_tar(tar, metadata, json_name)
     return tar, tar_buf, archive_size
 
 
-def preprocess(example: Dict[str, Any]) -> List[Dict[str, Any]]:
+def preprocess(example: Dict[str, Any]) -> Dict[str, Any]:
     """
     Preprocess the example into a preprocessed result with keys 'anchor', 'positive', and 'json'
     """
@@ -195,27 +185,16 @@ def preprocess(example: Dict[str, Any]) -> List[Dict[str, Any]]:
             with preprocess.preprocessor as preprocessor:  # type: ignore
                 audio, sr = load_tensor_from_mp3_bytes(example["mp3"], preprocess.device)  # type: ignore
 
-                positive_batch, anchor_batch = preprocessor(
-                    audio, sample_rate=sr, train=True
-                )
+                positive, anchor = preprocessor(audio, sample_rate=sr, train=True)
 
-                # create metadata file and encode to bytes
-                metadata = {
-                    "song_id": example["json"]["id"],
-                    "example_id": str(uuid4()),
-                }
-                metadata = json.dumps(metadata).encode("utf-8")
+            # create metadata file and encode to bytes
+            metadata = {
+                "song_id": example["json"]["id"],
+                "example_id": str(uuid4()),
+            }
+            metadata = json.dumps(metadata).encode("utf-8")
 
-                result = [
-                    {
-                        "anchor": anchor_batch[i],
-                        "positive": positive_batch[i],
-                        "json": {"song_id": example["json"]["id"], "id": str(uuid4())},
-                    }
-                    for i in range(anchor_batch.shape[0])
-                ]
-
-            return result
+            return {"anchor": anchor, "positive": positive, "json": metadata}
     except Exception:
         print("an error occured trying to preprocess a song")
         traceback.print_exc(file=sys.stderr)
@@ -245,7 +224,6 @@ def upload_split(
     tar = None
     tar_buf = None
     archive_size = 0
-    split_iter = iter(split)
     if procs is not None:
         n = max(2 * procs, 16)  # size of task chunks to hold in memory at once
     elif threads is not None:
@@ -286,7 +264,7 @@ def upload_split(
                 # schedule the first n futures
                 futures = {
                     executor.submit(preprocess, task)
-                    for task in itertools.islice(split_iter, n)
+                    for task in itertools.islice(split, n)
                 }
 
                 while futures:
@@ -306,7 +284,7 @@ def upload_split(
                         pbar.update(1)
 
                     # schedule the next set of futures
-                    for task in itertools.islice(split_iter, len(done)):
+                    for task in itertools.islice(split, len(done)):
                         futures.add(executor.submit(preprocess, task))
 
         elif device == "cuda":
@@ -320,7 +298,7 @@ def upload_split(
 
                 futures = {
                     executor.submit(preprocess, task)
-                    for task in itertools.islice(split_iter, n)
+                    for task in itertools.islice(split, n)
                 }
 
                 while futures:
@@ -340,7 +318,7 @@ def upload_split(
                         pbar.update(1)
 
                     # schedule the next set of futures
-                    for task in itertools.islice(split_iter, len(done)):
+                    for task in itertools.islice(split, len(done)):
                         futures.add(executor.submit(preprocess, task))
 
         else:
@@ -416,8 +394,14 @@ if __name__ == "__main__":
         train_tars = [str(tar) for tar in train_dir.glob("*.tar")]
         test_tars = [str(tar) for tar in test_dir.glob("*.tar")]
 
-        train_split = wds.WebDataset(train_tars, shardshuffle=len(train_tars)).decode()
-        test_split = wds.WebDataset(test_tars, shardshuffle=len(test_tars)).decode()
+        train_split = (
+            wds.WebDataset(train_tars, shardshuffle=len(train_tars))
+            .shuffle(200)
+            .decode()
+        )
+        test_split = (
+            wds.WebDataset(test_tars, shardshuffle=len(test_tars)).shuffle(200).decode()
+        )
 
     else:
         d = load_webdataset(args.source, ["train", "test"], args.token)
@@ -434,17 +418,6 @@ if __name__ == "__main__":
     upload_split(
         split=train_split,
         split_name="train",
-        preprocess_config=preprocess_config,
-        obfuscator_config=obfuscator_config,
-        target_repo=args.target,
-        token=args.token,
-        procs=args.procs,
-        threads=args.threads,
-        shard_size=args.shardsize,
-    )
-    upload_split(
-        split=test_split,
-        split_name="test",
         preprocess_config=preprocess_config,
         obfuscator_config=obfuscator_config,
         target_repo=args.target,
