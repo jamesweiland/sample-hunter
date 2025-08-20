@@ -21,7 +21,7 @@ perturb_num_workers: 1
 musan: "/content/drive/MyDrive/sample-hunter/musan"
 
 # train config
-source_batch_size: 350
+source_batch_size: 150
 sub_batch_size: 2000
 learning_rate: 0.005
 num_epochs: 10
