@@ -56,7 +56,6 @@ def train_single_epoch(
             anchor_batch = anchor.to(device)
             positive_batch = positive.to(device)
             keys = keys.to(device)
-            print(f"unique ids in sub batch: {torch.unique(keys).shape}")
 
             # predict embeddings
             anchor_embeddings = model(anchor_batch)
@@ -230,13 +229,9 @@ def train_collate_fn(
     uuid_to_int = {u: i for i, u in enumerate(uuids)}
 
     keys = torch.tensor([uuid_to_int[u] for u in uuids])
-    print(f"unique ids in entire source batch: {keys.shape}")
     keys = torch.repeat_interleave(keys, torch.tensor(num_examples_per_song))
 
     # shuffle the stuff
-    print(keys.shape)
-    print(anchors.shape)
-    print(positives.shape)
     assert keys.shape[0] == anchors.shape[0] and keys.shape[0] == positives.shape[0]
     index = torch.randperm(keys.shape[0])
     anchors = anchors[index]
@@ -371,6 +366,9 @@ if __name__ == "__main__":
                 example["positive"] = positive.to("cpu")
 
                 pbar.update(1)
+
+                if pbar.n == pbar.total:
+                    pbar.reset()
 
                 return example
 

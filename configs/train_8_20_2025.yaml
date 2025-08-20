@@ -17,17 +17,19 @@ highpass_range: [20, 1000]
 musan_noise_range: [15, 30] # snr
 lowpass_frac: 0.5
 perturb_num_workers: 1
-musan: "/content/drive/MyDrive/sample-hunter/musan"
+musan: "./_data/musan"
+# musan: "/content/drive/MyDrive/sample-hunter/musan"
 
 # train config
-source_batch_size: 200
+source_batch_size: 350
 sub_batch_size: 2000
 learning_rate: 0.005
 num_epochs: 10
 triplet_loss_margin: 0.5
 tensorboard_log_dir: "/content/drive/MyDrive/sample-hunter/8-20-2025/logs"
-tensorboard: "epoch"
-cache_dir: "/content/drive/MyDrive/sample-hunter/cache"
+tensorboard: "none"
+cache_dir: "./_data/cache"
+# cache_dir: "/content/drive/MyDrive/sample-hunter/cache"
 mine_strategy: "semi"
 
 # encodernet architecture hyperparameters
