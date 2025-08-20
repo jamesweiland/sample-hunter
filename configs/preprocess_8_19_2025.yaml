@@ -7,14 +7,15 @@ spec_num_sec: 1.0
 
 # preprocess config
 step_num_sec: 0.5
-volume_threshold: -50
+volume_threshold: -50 # dbfs
+target_rms: 0.1
 
 # obfuscator config
 time_stretch_factors: [0.75, 1.0, 1.25, 1.5]
 pitch_factors: [0.6, 0.8, 1.0, 1.2, 1.5]
 lowpass_range: [6000, 12000]
 highpass_range: [20, 1000]
-musan_noise_range: [-25, -18]
+musan_noise_range: [15, 30] # snr
 lowpass_frac: 0.5
 perturb_num_workers: 1
-musan: "/home/james/code/sample-hunter/_data/musan"
+musan: "/content/drive/MyDrive/sample-hunter/musan"
