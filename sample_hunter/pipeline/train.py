@@ -214,39 +214,28 @@ def train(
 def train_collate_fn(
     batch: List[Dict[str, Any]],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    anchors = []
-    positives = []
-    num_examples_per_song = []
-    uuids = []
-    for i in range(len(batch)):
-        ex = batch[i]
-        anchors.append(ex["anchor"].view(ex["anchor"].shape[1:]))
-        positives.append(ex["positive"].view(ex["positive"].shape[1:]))
-        num_examples_per_song.append(anchors[i].shape[0])
-        uuids.append(uuid.UUID(ex["json"]["id"][0]))
 
-    anchors = torch.cat(anchors, dim=0)
-    positives = torch.cat(positives, dim=0)
-    del batch
-    gc.collect()
-    uuid_to_int = {u: i for i, u in enumerate(uuids)}
+    num_examples_per_song = torch.tensor(
+        [ex["anchor"].shape[1] for ex in batch], device="cpu"
+    )
 
-    keys = torch.tensor([uuid_to_int[u] for u in uuids])
-    keys = torch.repeat_interleave(keys, torch.tensor(num_examples_per_song))
-
-    # shuffle the stuff
-    assert keys.shape[0] == anchors.shape[0] and keys.shape[0] == positives.shape[0]
-    index = torch.randperm(keys.shape[0])
-    # collect once more before a very memory intensive shuffle
-    gc.collect()
+    anchors = torch.cat([ex["anchor"].view(ex["anchor"].shape[1:]) for ex in batch])
+    index = torch.randperm(anchors.shape[0])
     anchors = anchors[index]
     gc.collect()
+    positives = torch.cat(
+        [ex["positive"].view(ex["positive"].shape[1:]) for ex in batch]
+    )
     positives = positives[index]
     gc.collect()
-    keys = keys[index]
+    uuids = [uuid.UUID(ex["json"]["id"][0]) for ex in batch]
+    uuid_to_int = {u: i for i, u in enumerate(uuids)}
+    uuids = torch.tensor([uuid_to_int[u] for u in uuids], device="cpu")
+    uuids = torch.repeat_interleave(uuids, num_examples_per_song)
+    uuids = uuids[index]
     gc.collect()
 
-    return anchors, positives, keys
+    return anchors, positives, uuids
 
 
 def flatten(
