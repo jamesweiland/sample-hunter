@@ -240,16 +240,25 @@ def train_collate_fn(
     # collect once more before a very memory intensive shuffle
     gc.collect()
     anchors = anchors.view(-1)[index].view(anchors.size())
+    gc.collect()
     positives = positives.view(-1)[index].view(positives.size())
+    gc.collect()
     keys = keys.view(-1)[index].view(keys.size())
+    gc.collect()
 
     return anchors, positives, keys
 
 
-def flatten(batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_size: int):
+def flatten(
+    batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    batch_size: int,
+    quantize_scale: int | None = None,
+    zero_point: int | None = None,
+):
     """splits batch up into sub_batches with size `batch_size`."""
     sub_batches = [torch.split(t, batch_size) for t in batch]
     for sub_batch in zip(*sub_batches):
+        sub_batch = tuple(torch.dequantize(t) for t in sub_batch if t.is_quantized() else t)
         yield sub_batch
 
 
@@ -367,8 +376,18 @@ if __name__ == "__main__":
             def train_map_fn(example):
                 audio, sr = load_tensor_from_mp3_bytes(example["mp3"], DEVICE)
                 anchor, positive = preprocessor(audio, sample_rate=sr, train=True)
-                example["anchor"] = anchor.to("cpu")
-                example["positive"] = positive.to("cpu")
+                example["anchor"] = torch.quantize_per_tensor(
+                    anchor.to("cpu"),
+                    train_config.quantize_scale,
+                    train_config.zero_point,
+                    torch.qint8,
+                )
+                example["positive"] = torch.quantize_per_tensor(
+                    positive.to("cpu"),
+                    train_config.quantize_scale,
+                    train_config.zero_point,
+                    torch.qint8,
+                )
 
                 pbar.update(1)
 
