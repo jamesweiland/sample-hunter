@@ -153,6 +153,8 @@ class TrainConfig(YAMLConfig):
     cache_dir: Path | None = None
     mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY
     num_threads: int = 2
+    quantize_scale: float = -1  # fix
+    zero_point: int = -1  # fix
 
 
 @dataclass

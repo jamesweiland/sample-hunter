@@ -28,6 +28,8 @@ num_epochs: 10
 triplet_loss_margin: 0.5
 tensorboard_log_dir: "/content/drive/MyDrive/sample-hunter/8-20-2025/logs"
 tensorboard: "epoch"
+quantize_scale: 452.1110 # fix
+zero_point: 0 # fix
 # cache_dir: "./_data/cache"
 cache_dir: "/content/drive/MyDrive/sample-hunter/cache"
 mine_strategy: "semi"

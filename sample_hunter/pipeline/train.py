@@ -239,11 +239,11 @@ def train_collate_fn(
     index = torch.randperm(keys.shape[0])
     # collect once more before a very memory intensive shuffle
     gc.collect()
-    anchors = anchors.view(-1)[index].view(anchors.size())
+    anchors = anchors[index]
     gc.collect()
-    positives = positives.view(-1)[index].view(positives.size())
+    positives = positives[index]
     gc.collect()
-    keys = keys.view(-1)[index].view(keys.size())
+    keys = keys[index]
     gc.collect()
 
     return anchors, positives, keys
@@ -252,13 +252,13 @@ def train_collate_fn(
 def flatten(
     batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     batch_size: int,
-    quantize_scale: int | None = None,
-    zero_point: int | None = None,
 ):
     """splits batch up into sub_batches with size `batch_size`."""
     sub_batches = [torch.split(t, batch_size) for t in batch]
     for sub_batch in zip(*sub_batches):
-        sub_batch = tuple(torch.dequantize(t) for t in sub_batch if t.is_quantized() else t)
+        sub_batch = tuple(
+            torch.dequantize(t) if t.is_quantized else t for t in sub_batch
+        )
         yield sub_batch
 
 

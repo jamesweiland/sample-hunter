@@ -1,8 +1,8 @@
 import torch
 from torch.quantization import MinMaxObserver
 import webdataset as wds
-import random
 import argparse
+from tqdm import tqdm
 
 from pathlib import Path
 
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     tars.extend(list(test_dir.glob("*.tar")))
     tars = [str(tar) for tar in tars]
 
-    dataset = wds.WebDataset(tars, shardshuffle=len(tars)).decode().shuffle(200)
+    dataset = wds.WebDataset(tars, shardshuffle=len(tars)).shuffle(200).decode()
 
     if args.config:
         preprocess_config = PreprocessConfig.from_yaml(args.config)
@@ -47,28 +47,47 @@ if __name__ == "__main__":
     observer = MinMaxObserver()
 
     n = 0
-    with torch.no_grad():
-        with Preprocessor(
-            preprocess_config, obfuscator=Obfuscator(obfuscator_config)
-        ) as preprocessor:
+    with tqdm(total=args.n) as pbar1:
+        with torch.no_grad():
+            with tqdm(total=30, desc="preprocessing...") as pbar2:
+                with Preprocessor(
+                    preprocess_config, obfuscator=Obfuscator(obfuscator_config)
+                ) as preprocessor:
 
-            def map_fn(example):
-                audio, sr = load_tensor_from_mp3_bytes(example["mp3"])
-                anchor, positive = preprocessor(audio, sample_rate=sr, train=True)
+                    def map_fn(example):
+                        audio, sr = load_tensor_from_mp3_bytes(example["mp3"])
+                        anchor, positive = preprocessor(
+                            audio, sample_rate=sr, train=True
+                        )
 
-                example["anchor"] = anchor
-                example["positive"] = positive
+                        example["anchor"] = anchor
+                        example["positive"] = positive
 
-            dataset = dataset.map(map_fn)
-            loader = wds.WebLoader(dataset).batched(30, collation_fn=train_collate_fn)
+                        pbar2.update(1)
+                        if pbar2.n == pbar2.total:
+                            pbar2.reset()
 
-            for anchor, positive, keys in loader:
-                observer(anchor)
-                observer(positive)
+                        return example
 
-                n += anchor.shape[0]
-                if n > args.n:
-                    break
+                    dataset = dataset.map(map_fn)
+                    loader = wds.WebLoader(dataset).batched(
+                        10, collation_fn=train_collate_fn
+                    )
+
+                    done = False
+
+                    for batch in loader:
+                        for anchor, positive, keys in flatten(batch, 500):
+                            observer(anchor)
+                            observer(positive)
+
+                            n += anchor.shape[0]
+                            pbar1.update(anchor.shape[0])
+                            if n > args.n:
+                                done = True
+                                break
+                        if done:
+                            break
 
     scale, zero_point = observer.calculate_qparams()
     print("Calibration complete")
