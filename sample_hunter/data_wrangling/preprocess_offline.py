@@ -173,10 +173,10 @@ def add_future_result_to_tar(
             tar_buf = io.BytesIO()
             tar = tarfile.open(fileobj=tar_buf, mode="w")
 
-    example_id = metadata["example_id"]
-    anchor_name = f"{example_id}.anchor.pth"
-    positive_name = f"{example_id}.positive.pth"
-    json_name = f"{example_id}.json"
+        example_id = metadata["example_id"]
+        anchor_name = f"{example_id}.anchor.pth"
+        positive_name = f"{example_id}.positive.pth"
+        json_name = f"{example_id}.json"
 
         # add tensors to tar
         archive_size += write_tensor_to_tar(tar, anchor, anchor_name)
