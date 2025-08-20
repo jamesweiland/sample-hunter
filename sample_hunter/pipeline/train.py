@@ -52,7 +52,7 @@ def train_single_epoch(
     epoch_total_loss = 0.0
     for batch in dataloader:
         sub_batches = flatten(batch, batch_size)
-        for anchor, positive, keys in sub_batches:
+        for anchor, positive, keys in tqdm(sub_batches, desc="Training..."):
             anchor_batch = anchor.to(device)
             positive_batch = positive.to(device)
             keys = keys.to(device)
@@ -360,84 +360,88 @@ if __name__ == "__main__":
     with Preprocessor(
         config=preprocess_config, obfuscator=Obfuscator(config=obfuscator_config)
     ) as preprocessor:
+        with tqdm(
+            desc="preprocessing examples...", total=train_config.source_batch_size
+        ) as pbar:
 
-        def train_map_fn(example):
-            audio, sr = load_tensor_from_mp3_bytes(example["mp3"], DEVICE)
-            print("preprocessing")
-            anchor, positive = preprocessor(audio, sample_rate=sr, train=True)
-            example["anchor"] = anchor.to("cpu")
-            example["positive"] = positive.to("cpu")
+            def train_map_fn(example):
+                audio, sr = load_tensor_from_mp3_bytes(example["mp3"], DEVICE)
+                anchor, positive = preprocessor(audio, sample_rate=sr, train=True)
+                example["anchor"] = anchor.to("cpu")
+                example["positive"] = positive.to("cpu")
 
-            print("example processed")
+                pbar.update(1)
 
-            return example
+                return example
 
-        train_dataset = train_dataset.map(train_map_fn)
-        test_dataset = test_dataset.map(train_map_fn)
+            train_dataset = train_dataset.map(train_map_fn)
+            test_dataset = test_dataset.map(train_map_fn)
 
-        if args.num:
-            train_dataset = train_dataset.slice(args.num)
+            if args.num:
+                train_dataset = train_dataset.slice(args.num)
 
-        train_loader = wds.WebLoader(
-            train_dataset,
-        ).batched(train_config.source_batch_size, collation_fn=train_collate_fn)
+            train_loader = wds.WebLoader(
+                train_dataset,
+            ).batched(train_config.source_batch_size, collation_fn=train_collate_fn)
 
-        test_loader = wds.WebLoader(
-            test_dataset,
-        ).batched(train_config.source_batch_size, collation_fn=train_collate_fn)
+            test_loader = wds.WebLoader(
+                test_dataset,
+            ).batched(train_config.source_batch_size, collation_fn=train_collate_fn)
 
-        if args.continue_:
-            if not args.from_:
-                raise ValueError("--continue was given with no model to load in")
-            if not args.from_.exists():
-                raise ValueError(f"--from not found: {args.from_}")
-            if not str(args.from_.stem).split("-")[-1].isdigit():
-                raise ValueError(
-                    f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
-                    "The stem must follow the format: <stem_name>-<epoch>"
+            if args.continue_:
+                if not args.from_:
+                    raise ValueError("--continue was given with no model to load in")
+                if not args.from_.exists():
+                    raise ValueError(f"--from not found: {args.from_}")
+                if not str(args.from_.stem).split("-")[-1].isdigit():
+                    raise ValueError(
+                        f"--from has a stem that does not follow the correct formatting: {args.from_.stem}\n"
+                        "The stem must follow the format: <stem_name>-<epoch>"
+                    )
+
+                epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
+                if epochs_already_trained >= train_config.num_epochs:
+                    raise ValueError(
+                        "The model has already been trained for more epochs than specified in the config for num_epochs\n"
+                        f"Epochs already trained: {epochs_already_trained}\n"
+                        f"Config num_epochs: {train_config.num_epochs}"
+                    )
+
+                model = load_model(args.from_, encoder_net_config)
+                num_epochs = range(
+                    epochs_already_trained + 1, train_config.num_epochs + 1
                 )
+            elif args.from_:
+                if not args.from_.exists():
+                    raise ValueError(f"--from not found: {args.from_}")
 
-            epochs_already_trained = int(str(args.from_.stem).split("-")[-1])
-            if epochs_already_trained >= train_config.num_epochs:
-                raise ValueError(
-                    "The model has already been trained for more epochs than specified in the config for num_epochs\n"
-                    f"Epochs already trained: {epochs_already_trained}\n"
-                    f"Config num_epochs: {train_config.num_epochs}"
-                )
+                model = load_model(args.from_, encoder_net_config)
+                num_epochs = range(1, train_config.num_epochs + 1)
+            else:
+                # make a new model
+                model = EncoderNet(encoder_net_config).to(DEVICE)  # type: ignore
+                num_epochs = range(1, train_config.num_epochs + 1)
 
-            model = load_model(args.from_, encoder_net_config)
-            num_epochs = range(epochs_already_trained + 1, train_config.num_epochs + 1)
-        elif args.from_:
-            if not args.from_.exists():
-                raise ValueError(f"--from not found: {args.from_}")
+            save_per_epoch = args.out if args.save_per_epoch else None
 
-            model = load_model(args.from_, encoder_net_config)
-            num_epochs = range(1, train_config.num_epochs + 1)
-        else:
-            # make a new model
-            model = EncoderNet(encoder_net_config).to(DEVICE)  # type: ignore
-            num_epochs = range(1, train_config.num_epochs + 1)
+            adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
+            triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
 
-        save_per_epoch = args.out if args.save_per_epoch else None
+            train(
+                model=model,
+                train_dataloader=train_loader,
+                test_dataloader=test_loader,
+                optimizer=adam,
+                loss_fn=triplet_loss,
+                sub_batch_size=train_config.sub_batch_size,
+                mine_strategy=train_config.mine_strategy,
+                log_dir=train_config.tensorboard_log_dir,
+                tensorboard=train_config.tensorboard,
+                device=DEVICE,
+                num_epochs=num_epochs,
+                triplet_loss_margin=train_config.triplet_loss_margin,
+                save_per_epoch=save_per_epoch,
+            )
 
-        adam = torch.optim.Adam(model.parameters(), lr=train_config.learning_rate)
-        triplet_loss = nn.TripletMarginLoss(margin=train_config.triplet_loss_margin)
-
-        train(
-            model=model,
-            train_dataloader=train_loader,
-            test_dataloader=test_loader,
-            optimizer=adam,
-            loss_fn=triplet_loss,
-            sub_batch_size=train_config.sub_batch_size,
-            mine_strategy=train_config.mine_strategy,
-            log_dir=train_config.tensorboard_log_dir,
-            tensorboard=train_config.tensorboard,
-            device=DEVICE,
-            num_epochs=num_epochs,
-            triplet_loss_margin=train_config.triplet_loss_margin,
-            save_per_epoch=save_per_epoch,
-        )
-
-        torch.save(model.state_dict(), args.out)
-        print(f"Model saved to {args.out}")
+            torch.save(model.state_dict(), args.out)
+            print(f"Model saved to {args.out}")
