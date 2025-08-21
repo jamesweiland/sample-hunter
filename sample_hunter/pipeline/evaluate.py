@@ -3,6 +3,7 @@ import torch
 from typing import Callable, Literal, Tuple
 
 from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_MINE_STRATEGY
+from sample_hunter.pipeline.train import flatten
 
 from .triplet_loss import triplet_accuracy, mine_negative, topk_triplet_accuracy
 from sample_hunter._util import DEVICE
@@ -11,6 +12,7 @@ from sample_hunter._util import DEVICE
 def evaluate(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
+    sub_batch_size: int,
     mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY,
     margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
     device: str = DEVICE,
@@ -25,24 +27,26 @@ def evaluate(
         sum_loss = 0.0
         sum_topk_accuracy = 0.0
         num_batches = 0
-        for anchor, positive, keys in dataloader:
-            anchor = anchor.to(device)
-            positive = positive.to(device)
-            keys = keys.to(device)
+        for batch in dataloader:
+            sub_batches = flatten(batch, sub_batch_size)
+            for anchor, positive, keys in sub_batches:
+                anchor = anchor.to(device)
+                positive = positive.to(device)
+                keys = keys.to(device)
 
-            batch_loss, batch_accuracy, batch_topk_accuracy = evaluate_batch(
-                model=model,
-                positive=positive,
-                anchor=anchor,
-                mine_strategy=mine_strategy,
-                song_ids=keys,
-                margin=margin,
-                device=device,
-            )
-            sum_accuracy += batch_accuracy
-            sum_loss += batch_loss
-            sum_topk_accuracy += batch_topk_accuracy
-            num_batches += 1
+                batch_loss, batch_accuracy, batch_topk_accuracy = evaluate_batch(
+                    model=model,
+                    positive=positive,
+                    anchor=anchor,
+                    mine_strategy=mine_strategy,
+                    song_ids=keys,
+                    margin=margin,
+                    device=device,
+                )
+                sum_accuracy += batch_accuracy
+                sum_loss += batch_loss
+                sum_topk_accuracy += batch_topk_accuracy
+                num_batches += 1
 
         avg_accuracy = sum_accuracy / num_batches
         avg_loss = sum_loss / num_batches

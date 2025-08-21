@@ -98,6 +98,9 @@ def train_single_epoch(
             epoch_total_accuracy += accuracy
             epoch_total_topk_accuracy += topk_accuracy
             num_batches += 1
+
+        del batch
+        del sub_batches
         gc.collect()
 
     epoch_average_loss = epoch_total_loss / num_batches
@@ -198,6 +201,7 @@ def train(
             test_loss, test_accuracy, test_topk_accuracy = evaluate(
                 model=model,
                 dataloader=test_dataloader,
+                sub_batch_size=sub_batch_size,
                 margin=triplet_loss_margin,
                 device=device,
             )
