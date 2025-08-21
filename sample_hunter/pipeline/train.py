@@ -234,6 +234,7 @@ def train_collate_fn(
         uuids = torch.tensor([uuid_to_int[u] for u in uuids], device="cpu")
         uuids = torch.repeat_interleave(uuids, num_examples_per_song)
         uuids = uuids[index]
+        del batch
         gc.collect()
 
     return anchors, positives, uuids
