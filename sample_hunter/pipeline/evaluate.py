@@ -3,8 +3,8 @@ import torch
 from typing import Callable, Literal, Tuple
 
 from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_MINE_STRATEGY
-from sample_hunter.pipeline.train import flatten
 
+from .data_loading import flatten
 from .triplet_loss import triplet_accuracy, mine_negative, topk_triplet_accuracy
 from sample_hunter._util import DEVICE
 

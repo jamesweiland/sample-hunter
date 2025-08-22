@@ -13,7 +13,7 @@ from tqdm import tqdm
 from sample_hunter.pipeline.transformations.obfuscator import Obfuscator
 from sample_hunter.pipeline.transformations.preprocessor import Preprocessor
 
-from .data_loading import load_tensor_from_mp3_bytes, load_webdataset
+from .data_loading import load_tensor_from_mp3_bytes, load_webdataset, flatten
 from .encoder_net import EncoderNet
 from .triplet_loss import topk_triplet_accuracy, triplet_accuracy, mine_negative
 from .evaluate import evaluate
@@ -243,20 +243,6 @@ def train_collate_fn(
         gc.collect()
 
     return anchors, positives, uuids
-
-
-def flatten(
-    batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    batch_size: int,
-):
-    """splits batch up into sub_batches with size `batch_size`."""
-    sub_batches = [torch.split(t, batch_size) for t in batch]
-    for sub_batch in zip(*sub_batches):
-        sub_batch = [(torch.dequantize(t) if t.is_quantized else t) for t in sub_batch]
-        sub_batch[0].requires_grad_()
-        sub_batch[1].requires_grad_()
-
-        yield tuple(sub_batch)
 
 
 def parse_args() -> argparse.Namespace:

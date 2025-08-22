@@ -21,6 +21,20 @@ from sample_hunter._util import HF_TOKEN, DEVICE
 from sample_hunter.config import DEFAULT_CACHE_DIR
 
 
+def flatten(
+    batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    batch_size: int,
+):
+    """splits batch up into sub_batches with size `batch_size`."""
+    sub_batches = [torch.split(t, batch_size) for t in batch]
+    for sub_batch in zip(*sub_batches):
+        sub_batch = [(torch.dequantize(t) if t.is_quantized else t) for t in sub_batch]
+        sub_batch[0].requires_grad_()
+        sub_batch[1].requires_grad_()
+
+        yield tuple(sub_batch)
+
+
 def load_tensor_from_pth_bytes(
     initial_bytes: Buffer, device: str = DEVICE
 ) -> torch.Tensor:
