@@ -2,7 +2,11 @@ import torch.nn as nn
 import torch
 from typing import Callable, Literal, Tuple
 
-from sample_hunter.config import DEFAULT_TRIPLET_LOSS_MARGIN, DEFAULT_MINE_STRATEGY
+from sample_hunter.config import (
+    DEFAULT_TRIPLET_LOSS_MARGIN,
+    DEFAULT_MINE_STRATEGY,
+    DEFAULT_TOP_K,
+)
 
 from .data_loading import flatten
 from .triplet_loss import triplet_accuracy, mine_negative, topk_triplet_accuracy
@@ -13,6 +17,7 @@ def evaluate(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
     sub_batch_size: int,
+    k: int | None = None,
     mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY,
     margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
     device: str = DEVICE,
@@ -21,6 +26,7 @@ def evaluate(
     Evaluate on a test dataset and return the average
     accuracy for the dataset
     """
+    k = k or DEFAULT_TOP_K
     with torch.no_grad():
 
         sum_accuracy = 0.0
@@ -64,6 +70,7 @@ def evaluate_batch(
     anchor: torch.Tensor,
     mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY,
     margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
+    k: int = DEFAULT_TOP_K,
     loss_fn: Callable = torch.nn.TripletMarginLoss(margin=DEFAULT_TRIPLET_LOSS_MARGIN),
     device: str = DEVICE,
     debug: bool = False,
@@ -96,7 +103,11 @@ def evaluate_batch(
             debug=debug,
         )
 
-        topk_accuracy = topk_triplet_accuracy(anchor_embeddings, positive_embeddings)
+        k = min(k, torch.unique(song_ids).numel())
+
+        topk_accuracy = topk_triplet_accuracy(
+            anchor_embeddings, positive_embeddings, top_k=k
+        )
 
         loss = loss_fn(
             anchor_embeddings, positive_embeddings, negative_embeddings

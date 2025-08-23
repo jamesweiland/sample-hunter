@@ -121,6 +121,7 @@ def train(
     optimizer: torch.optim.Optimizer,
     num_epochs: range,
     triplet_loss_margin: float,
+    k: int | None = None,
     tensorboard: str = "none",
     log_dir: Path | None = None,
     test_dataloader: torch.utils.data.DataLoader | None = None,
@@ -201,6 +202,7 @@ def train(
             test_loss, test_accuracy, test_topk_accuracy = evaluate(
                 model=model,
                 dataloader=test_dataloader,
+                k=k,
                 sub_batch_size=sub_batch_size,
                 margin=triplet_loss_margin,
                 device=device,
