@@ -15,6 +15,7 @@ from sample_hunter.config import (
     DEFAULT_TRIPLET_LOSS_MARGIN,
     DEFAULT_SAMPLE_RATE,
     DEFAULT_DATASET_REPO,
+    EncoderNetConfig,
 )
 from sample_hunter._util import (
     DEVICE,
@@ -172,6 +173,8 @@ def parse_args() -> argparse.Namespace:
         help="The path to the model to validate",
     )
 
+    parser.add_argument("--config", type=Path, help="The path to the config.yaml file")
+
     parser.add_argument(
         "--token",
         type=str,
@@ -191,7 +194,12 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    model = load_model(args.model)
+    if args.config:
+        config = EncoderNetConfig.from_yaml(args.config)
+    else:
+        config = EncoderNetConfig()
+
+    model = load_model(args.model, config)
 
     dataset = wds.WebDataset("./_data/validation-shards/validation/validation-0001.tar")
 
