@@ -15,6 +15,7 @@ from sample_hunter.config import (
     DEFAULT_TRIPLET_LOSS_MARGIN,
     DEFAULT_SAMPLE_RATE,
     DEFAULT_DATASET_REPO,
+    DEFAULT_TOP_K,
     EncoderNetConfig,
 )
 from sample_hunter._util import (
@@ -31,7 +32,7 @@ def validate(
     sample_rate: int = DEFAULT_SAMPLE_RATE,
     device: str = DEVICE,
     debug: bool = False,
-) -> Tuple[float, float, int]:
+) -> Tuple[float, float, float, float, int]:
     """
     Validate the model using a validation set. This is very similar to `sample_hunter.pipeline.evaluate.evaluate`, with the key difference
     being that no batching occurs in this function: all examples are validated at once.
@@ -122,11 +123,18 @@ def validate(
             )
             batch_size = all_anchors.shape[0]
 
-            loss, accuracy, topk_accuracy = evaluate_batch(
+            (
+                loss,
+                triplet_accuracy,
+                topk_triplet_accuracy,
+                song_accuracy,
+                topk_song_accuracy,
+            ) = evaluate_batch(
                 model=model,
                 positive=all_positives,
                 song_ids=all_keys,
                 anchor=all_anchors,
+                top_k=DEFAULT_TOP_K,
                 mine_strategy="hard",
                 margin=alpha,
                 device=device,
@@ -142,12 +150,12 @@ def validate(
                 #         play_tensor_audio(audio[key][0], message="Playing anchor...")
                 #         play_tensor_audio(audio[key][1], message="Playing positive...")
 
-                accuracy = cast(torch.Tensor, accuracy)
+                triplet_accuracy = cast(torch.Tensor, triplet_accuracy)
                 keys_with_all_failures = []
                 unique_keys = torch.unique(all_keys)
                 for k in unique_keys:
                     mask = k == all_keys
-                    if torch.all(~accuracy[mask]):
+                    if torch.all(~triplet_accuracy[mask]):
                         keys_with_all_failures.append(k)
 
                 print(
@@ -157,9 +165,9 @@ def validate(
                     f"Percentage of keys that completely failed: {len(keys_with_all_failures) / len(unique_keys):.2%}"
                 )
 
-                accuracy = accuracy.float().mean().item()  # type: ignore
+                triplet_accuracy = triplet_accuracy.float().mean().item()  # type: ignore
 
-            return accuracy, topk_accuracy, batch_size  # type: ignore
+            return triplet_accuracy, topk_triplet_accuracy, song_accuracy, topk_song_accuracy, batch_size  # type: ignore
 
 
 def parse_args() -> argparse.Namespace:
@@ -203,7 +211,15 @@ if __name__ == "__main__":
 
     dataset = wds.WebDataset("./_data/validation-shards/validation/validation-0001.tar")
 
-    accuracy, topk_accuracy, batch_size = validate(model, dataset, debug=args.debug)
-    print(f"Average validation accuracy: {accuracy:.2%}")
-    print(f"Average validation top k accuracy: {topk_accuracy:.2%}")
+    (
+        triplet_accuracy,
+        topk_triplet_accuracy,
+        song_accuracy,
+        topk_song_accuracy,
+        batch_size,
+    ) = validate(model, dataset, debug=args.debug)
+    print(f"Average validation accuracy: {triplet_accuracy:.2%}")
+    print(f"Average validation top k accuracy: {topk_triplet_accuracy:.2%}")
+    print(f"Average song accuracy: {song_accuracy:.2%}")
+    print(f"Average top k song accuracy: {topk_song_accuracy:.2%}")
     print(f"Batch size: {batch_size}")

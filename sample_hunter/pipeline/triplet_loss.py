@@ -58,6 +58,31 @@ def topk_triplet_accuracy(
     return correct.float().mean().item()
 
 
+def song_accuracy(
+    anchor: torch.Tensor,
+    positive: torch.Tensor,
+    song_ids: torch.Tensor,
+) -> float:
+    return topk_song_accuracy(anchor, positive, song_ids, 1)
+
+
+def topk_song_accuracy(
+    anchor: torch.Tensor, positive: torch.Tensor, song_ids: torch.Tensor, k: int
+) -> float:
+    """Calculates the ratio of embeddings in positive_embeddings whose nearest neighbor has the same song id."""
+    dists = torch.cdist(anchor, positive, p=2)  # (B, B)
+    nearest_neighbors = torch.topk(dists, k, largest=False).indices  # (B, k)
+    nearest_song_ids = song_ids[nearest_neighbors]
+
+    # Expand song_ids to compare with each of the k nearest neighbors
+    target_song_ids = song_ids.unsqueeze(1).expand(-1, k)  # (B, k)
+
+    matches = (nearest_song_ids == target_song_ids).any(dim=1)  # (B,)
+    accuracy = matches.float().mean().item()
+
+    return accuracy
+
+
 def mine_negative(
     song_ids: torch.Tensor,
     positive_embeddings: torch.Tensor,

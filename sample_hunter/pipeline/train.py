@@ -18,6 +18,7 @@ from sample_hunter.config import (
     ObfuscatorConfig,
     EncoderNetConfig,
     DEFAULT_DATASET_REPO,
+    DEFAULT_TOP_K,
 )
 from sample_hunter._util import (
     DEVICE,
@@ -106,6 +107,7 @@ def train(
     optimizer: torch.optim.Optimizer,
     num_epochs: range,
     triplet_loss_margin: float,
+    k: int = DEFAULT_TOP_K,
     tensorboard: str = "none",
     log_dir: Path | None = None,
     test_dataloader: torch.utils.data.DataLoader | None = None,
@@ -182,16 +184,25 @@ def train(
 
         if test_dataloader is not None:
             # evaluate accuracy as we go on the test set
-            test_loss, test_accuracy, test_topk_accuracy = evaluate(
+            (
+                test_loss,
+                test_triplet_accuracy,
+                test_topk_triplet_accuracy,
+                test_song_accuracy,
+                test_topk_song_accuracy,
+            ) = evaluate(
                 model=model,
                 dataloader=test_dataloader,
                 margin=triplet_loss_margin,
                 device=device,
+                top_k=k,
             )
             if tensorboard != "none":
-                writer.add_scalar("Testing accuracy", test_accuracy, i)  # type: ignore
+                writer.add_scalar("Testing triplet accuracy", test_triplet_accuracy, i)  # type: ignore
                 writer.add_scalar("Testing loss", test_loss, i)  # type: ignore
-                writer.add_scalar("Testing top K accuracy", test_topk_accuracy, i)  # type: ignore
+                writer.add_scalar("Testing top K triplet accuracy", test_topk_triplet_accuracy, i)  # type: ignore
+                writer.add_scalar("Testing song accuracy", test_song_accuracy, i)  # type: ignore
+                writer.add_scalar("Testing top K song accuracy", test_topk_song_accuracy, i)  # type: ignore
 
         print("--------------------------------------------")
     if tensorboard != "none":
