@@ -160,21 +160,29 @@ def mine_semi_hard_negative(
     """
     with torch.no_grad():
 
-        # pos_dists has shape (batch_size) and neg_dists has shape (batch_size, batch_size)
+        # pos_dists has shape (batch_size) and neg_dists has shape (batch_size, 2*batch_size)
         pos_dists = torch.linalg.vector_norm(
             anchor_embeddings - positive_embeddings, ord=2, dim=1
         )
-        # i don't really understand why this is only anchor embeddings,
-        # but chat insisted
-        neg_dists = torch.cdist(anchor_embeddings, anchor_embeddings, p=2)
+
+        # all embeddings should be considered as potential hard negatives
+        embeddings = torch.cat([anchor_embeddings, positive_embeddings], dim=0)
+        doubled_song_ids = torch.cat(
+            [song_ids, song_ids], dim=0
+        )  # we have to do this to match the catted embeddings
+
+        # find dists between anchors and all other embeddings
+        neg_dists = torch.cdist(anchor_embeddings, embeddings, p=2)  # (B, 2B)
 
         # create masks. within_margin_mask ensures that the tensor satisfies the 'semi-hard' criterion
         # different_song_mask checks that the song_id is different
-        same_song_mask = song_ids.unsqueeze(dim=1) == song_ids.unsqueeze(dim=0)
+        same_song_mask = song_ids.unsqueeze(dim=1) == doubled_song_ids.unsqueeze(
+            dim=0
+        )  # (B, 2B)
         margin_mask = (neg_dists > pos_dists.unsqueeze(dim=1)) & (
             neg_dists < (pos_dists.unsqueeze(dim=1) + alpha)
-        )
-        valid_neg_mask = (~same_song_mask) & margin_mask
+        )  # (B, 2B)
+        valid_neg_mask = (~same_song_mask) & margin_mask  # (B, 2B)
 
         # check if any rows are invalid
         # if they are, drop the semi hard criterion
@@ -190,11 +198,15 @@ def mine_semi_hard_negative(
             no_valid_neg = ~valid_neg_mask.any(dim=1)
             valid_neg_mask[no_valid_neg] = True
 
+        # negatives will be (2B, E)
         negatives = _mine_negatives(
-            embeddings=anchor_embeddings,
-            dists=neg_dists,
-            valid_neg_mask=valid_neg_mask,
+            embeddings=embeddings,  # (2B, E)
+            dists=neg_dists,  # (B, 2B)
+            valid_neg_mask=valid_neg_mask,  # (B, 2B)
         )
+
+        # we only want the negatives per anchor, so have to cut out the second half
+        negatives = negatives[: anchor_embeddings.shape[0]]  # (B, E)
 
         return negatives
 
