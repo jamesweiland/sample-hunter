@@ -22,7 +22,7 @@ musan: "/home/james/code/sample-hunter/_data/musan"
 # train config
 source_batch_size: 10
 sub_batch_size: 100
-learning_rate: 0.00005
+learning_rate: 0.005
 num_epochs: 10
 alpha: 0.2
 tensorboard_log_dir: "/home/james/code/sample-hunter/_data/logs"
