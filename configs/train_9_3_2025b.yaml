@@ -32,7 +32,7 @@ quantize_scale: 452.1110 # fix
 zero_point: 0 # fix
 # cache_dir: "./_data/cache"
 cache_dir: "/content/drive/MyDrive/sample-hunter/cache"
-mine_strategy: "semi"
+mine_strategy: "hard"
 
 # encodernet architecture hyperparameters
 kernel_stride: 1
