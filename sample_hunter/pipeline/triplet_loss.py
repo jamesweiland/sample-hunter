@@ -71,8 +71,13 @@ def song_accuracy(
     positive: torch.Tensor,
     song_ids: torch.Tensor,
 ) -> float:
-    return topk_song_accuracy(anchor, positive, song_ids, 1)
+    dists = torch.cdist(anchor, positive, p=2) # (B, B)
+    nearest_neighbors = torch.min(dists, dim=1).indices # (B,)
+    
+    predicted_song_ids = song_ids[nearest_neighbors] # (B,)
+    matches = (song_ids == predicted_song_ids) # (B,)
 
+    return matches.float().mean().item()
 
 def topk_song_accuracy(
     anchor: torch.Tensor, positive: torch.Tensor, song_ids: torch.Tensor, k: int
