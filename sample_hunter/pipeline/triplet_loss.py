@@ -46,7 +46,15 @@ def topk_triplet_accuracy(
 
     dists = torch.cdist(anchor, positive, p=2)  # (B, B)
 
-    nearest_neighbors = torch.topk(dists, top_k, dim=1, largest=False).indices  # (B, k)
+    try:
+        nearest_neighbors = torch.topk(
+            dists, top_k, dim=1, largest=False
+        ).indices  # (B, k)
+    except RuntimeError:
+        # selected index k out of range
+        nearest_neighbors = torch.topk(
+            dists, dists.shape[1], dim=1, largest=False
+        ).indices
 
     labels = torch.arange(
         0, anchor.shape[0], 1, device=anchor.device
