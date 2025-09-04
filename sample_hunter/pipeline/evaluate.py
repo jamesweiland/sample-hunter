@@ -59,6 +59,7 @@ def evaluate(
                     positive=positive,
                     anchor=anchor,
                     song_ids=keys,
+                    mine_strategy=mine_strategy,
                     top_k=k,
                     margin=margin,
                     device=device,

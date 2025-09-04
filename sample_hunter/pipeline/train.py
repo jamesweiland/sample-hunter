@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
-from typing import Any, Callable, Dict, List, Tuple, cast
+from typing import Any, Callable, Dict, List, Literal, Tuple, cast
 import argparse
 from pathlib import Path
 import webdataset as wds
@@ -117,7 +117,7 @@ def train(
     model: nn.Module,
     train_dataloader: torch.utils.data.DataLoader,
     loss_fn: Callable,
-    mine_strategy: str,
+    mine_strategy: Literal["semi", "hard"],
     sub_batch_size: int,
     optimizer: torch.optim.Optimizer,
     num_epochs: range,
@@ -210,6 +210,7 @@ def train(
                 model=model,
                 dataloader=test_dataloader,
                 k=k,
+                mine_strategy=mine_strategy,
                 sub_batch_size=sub_batch_size,
                 margin=triplet_loss_margin,
                 device=device,
