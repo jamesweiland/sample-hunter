@@ -396,6 +396,7 @@ if __name__ == "__main__":
 
             if args.num:
                 train_dataset = train_dataset.slice(args.num)
+                test_dataset = test_dataset.slice(int(0.25 * args.num))
 
             train_loader = wds.WebLoader(
                 train_dataset,
