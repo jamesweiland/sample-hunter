@@ -25,8 +25,8 @@ source_batch_size: 100
 sub_batch_size: 1000
 learning_rate: 0.005
 num_epochs: 30
-triplet_loss_margin: 1.5
-tensorboard_log_dir: "/content/drive/MyDrive/sample-hunter/9-5-2025/logs"
+triplet_loss_margin: 3.0
+tensorboard_log_dir: "/content/drive/MyDrive/sample-hunter/9-5-2025b/logs"
 tensorboard: "epoch"
 quantize_scale: 452.1110 # fix
 zero_point: 0 # fix
