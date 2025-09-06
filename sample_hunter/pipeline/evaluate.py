@@ -23,6 +23,7 @@ def evaluate(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
     sub_batch_size: int,
+    loss_fn,
     k: int | None = None,
     mine_strategy: Literal["semi", "hard"] = DEFAULT_MINE_STRATEGY,
     margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
@@ -61,6 +62,7 @@ def evaluate(
                     song_ids=keys,
                     mine_strategy=mine_strategy,
                     top_k=k,
+                    loss_fn=loss_fn,
                     margin=margin,
                     device=device,
                 )

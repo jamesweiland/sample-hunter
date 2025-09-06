@@ -210,6 +210,7 @@ def train(
                 model=model,
                 dataloader=test_dataloader,
                 k=k,
+                loss_fn=loss_fn,
                 mine_strategy=mine_strategy,
                 sub_batch_size=sub_batch_size,
                 margin=triplet_loss_margin,
