@@ -86,7 +86,14 @@ def topk_song_accuracy(
 ) -> float:
     """Calculates the ratio of embeddings in positive_embeddings whose nearest neighbor has the same song id."""
     dists = torch.cdist(anchor, positive, p=2)  # (B, B)
-    nearest_neighbors = torch.topk(dists, k, largest=False).indices  # (B, k)
+
+    try:
+        nearest_neighbors = torch.topk(dists, k, dim=1, largest=False).indices  # (B, k)
+    except RuntimeError:
+        # selected index k out of range
+        nearest_neighbors = torch.topk(
+            dists, dists.shape[1], dim=1, largest=False
+        ).indices
     nearest_song_ids = song_ids[nearest_neighbors]
 
     # Expand song_ids to compare with each of the k nearest neighbors
