@@ -11,7 +11,7 @@ from sample_hunter.config import (
 from .data_loading import flatten
 from .triplet_loss import (
     triplet_accuracy,
-    mine_negative,
+    make_triplets,
     topk_triplet_accuracy,
     song_accuracy,
     topk_song_accuracy,
@@ -112,13 +112,14 @@ def evaluate_batch(
         positive_embeddings = model(positive)
         anchor_embeddings = model(anchor)
 
-        negative_embeddings = mine_negative(
+        anchor_embeddings, positive_embeddings, negative_embeddings = make_triplets(
             song_ids,
             positive_embeddings,
             anchor_embeddings,
             mine_strategy=mine_strategy,
             margin=margin,
-        )
+            filter=False,
+        )  # type: ignore
 
         triplet_accuracy_ = triplet_accuracy(
             anchor=anchor_embeddings,

@@ -2,6 +2,7 @@
 Triplet loss functions to be used in training and evaluation
 """
 
+from typing import Tuple
 import warnings
 import torch
 
@@ -71,13 +72,14 @@ def song_accuracy(
     positive: torch.Tensor,
     song_ids: torch.Tensor,
 ) -> float:
-    dists = torch.cdist(anchor, positive, p=2) # (B, B)
-    nearest_neighbors = torch.min(dists, dim=1).indices # (B,)
-    
-    predicted_song_ids = song_ids[nearest_neighbors] # (B,)
-    matches = (song_ids == predicted_song_ids) # (B,)
+    dists = torch.cdist(anchor, positive, p=2)  # (B, B)
+    nearest_neighbors = torch.min(dists, dim=1).indices  # (B,)
+
+    predicted_song_ids = song_ids[nearest_neighbors]  # (B,)
+    matches = song_ids == predicted_song_ids  # (B,)
 
     return matches.float().mean().item()
+
 
 def topk_song_accuracy(
     anchor: torch.Tensor, positive: torch.Tensor, song_ids: torch.Tensor, k: int
@@ -96,10 +98,11 @@ def topk_song_accuracy(
     return accuracy
 
 
-def mine_negative(
+def make_triplets(
     song_ids: torch.Tensor,
     positive_embeddings: torch.Tensor,
     anchor_embeddings: torch.Tensor,
+    filter: bool,
     mine_strategy: str = DEFAULT_MINE_STRATEGY,
     margin: float = DEFAULT_TRIPLET_LOSS_MARGIN,
 ):
@@ -117,7 +120,37 @@ def mine_negative(
             song_ids=song_ids,
         )
 
-    return negative_embeddings
+    if filter:
+        # filter out any easy triplets
+        return filter_triplets(
+            anchor_embeddings, positive_embeddings, negative_embeddings, margin
+        )
+    else:
+        return anchor_embeddings, positive_embeddings, negative_embeddings
+
+
+def filter_triplets(
+    anchor: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor, margin: float
+) -> None | Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Filter out possible triplets so we only have those that violate the triplet constraint of
+    having the positive at least margin closer to the anchor than the negative.
+    """
+
+    pos_dists = torch.linalg.vector_norm(anchor - positive, ord=2, dim=1)
+    neg_dists = torch.linalg.vector_norm(anchor - negative, ord=2, dim=1)
+
+    violation_mask = (pos_dists + margin) >= neg_dists
+
+    if violation_mask.sum() == 0:
+        warnings.warn("No trainable triplets found in batch")
+        return None
+
+    anchor = anchor[violation_mask]
+    positive = positive[violation_mask]
+    negative = negative[violation_mask]
+
+    return anchor, positive, negative
 
 
 def mine_hardest_negative(

@@ -15,7 +15,7 @@ from sample_hunter.pipeline.transformations.preprocessor import Preprocessor
 
 from .data_loading import load_tensor_from_mp3_bytes, load_webdataset, flatten
 from .encoder_net import EncoderNet
-from .triplet_loss import topk_triplet_accuracy, triplet_accuracy, mine_negative
+from .triplet_loss import topk_triplet_accuracy, triplet_accuracy, make_triplets
 from .evaluate import evaluate
 from sample_hunter.config import (
     PreprocessConfig,
@@ -64,41 +64,48 @@ def train_single_epoch(
             positive_embeddings = model(positive_batch)
 
             # mine the negative embedding
-            negative_embeddings = mine_negative(
+            result = make_triplets(
                 anchor_embeddings=anchor_embeddings,
                 positive_embeddings=positive_embeddings,
                 song_ids=keys,
                 mine_strategy=mine_strategy,
                 margin=triplet_loss_margin,
+                filter=True,
             )
-            # calculate loss
-            loss = loss_fn(anchor_embeddings, positive_embeddings, negative_embeddings)
+            if result is not None:
+                anchor_embeddings, positive_embeddings, negative_embeddings = result
+                # calculate loss
+                loss = loss_fn(
+                    anchor_embeddings, positive_embeddings, negative_embeddings
+                )
 
-            # backpropagate loss and update weights
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                # backpropagate loss and update weights
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-            accuracy = triplet_accuracy(
-                anchor=anchor_embeddings,
-                positive=positive_embeddings,
-                negative=negative_embeddings,
-                margin=triplet_loss_margin,
-            )
+                accuracy = triplet_accuracy(
+                    anchor=anchor_embeddings,
+                    positive=positive_embeddings,
+                    negative=negative_embeddings,
+                    margin=triplet_loss_margin,
+                )
 
-            topk_accuracy = topk_triplet_accuracy(
-                anchor_embeddings, positive_embeddings
-            )
+                topk_accuracy = topk_triplet_accuracy(
+                    anchor_embeddings, positive_embeddings
+                )
 
-            if writer:
-                writer.add_scalar("Training loss", loss.item(), num_batches)
-                writer.add_scalar("Training accuracy", accuracy, num_batches)
-                writer.add_scalar("Training top K accuracy", topk_accuracy, num_batches)
+                if writer:
+                    writer.add_scalar("Training loss", loss.item(), num_batches)
+                    writer.add_scalar("Training accuracy", accuracy, num_batches)
+                    writer.add_scalar(
+                        "Training top K accuracy", topk_accuracy, num_batches
+                    )
 
-            epoch_total_loss += loss.item()
-            epoch_total_accuracy += accuracy
-            epoch_total_topk_accuracy += topk_accuracy
-            num_batches += 1
+                epoch_total_loss += loss.item()
+                epoch_total_accuracy += accuracy
+                epoch_total_topk_accuracy += topk_accuracy
+                num_batches += 1
 
         del batch
         del sub_batches
